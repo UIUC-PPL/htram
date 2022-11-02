@@ -153,7 +153,6 @@ public:
       if  ((i % 10000) == 9999) CthYield();
 //      userDeliver(0);
     }
-    ckout << "[PE: " << CkMyPe() << "] Before Flush" << endl;
     tram->tflush();
   }
 
