@@ -1,0 +1,15 @@
+module tramNonSmp {
+  readonly CProxy_tramNonSmp tramNonSmpProxy;
+
+  message tramNonSmpMsg {
+    int next;
+    CmiInt8* payload_buffer;
+  };
+
+  group tramNonSmp {
+    entry tramNonSmp();
+    entry void insertValue(int value, int destPE);
+    entry void tflush(); 
+    entry void receive(tramNonSmpMsg*);
+  };
+};

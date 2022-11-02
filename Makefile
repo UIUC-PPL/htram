@@ -1,6 +1,15 @@
 CHARMC=../../../bin/charmc $(OPTS)
 
-all: libhtram.a
+all: libhtram.a libtramnonsmp.a
+
+libtramnonsmp.a : tramnonsmp.o
+	$(CHARMC) tramnonsmp.o -o libtramnonsmp.a -language charm++
+
+tramnonsmp.o : tramNonSmp.C tramNonSmp.def.h tramNonSmp.decl.h
+	$(CHARMC) -c tramnonsmp.o -g
+
+tramNonSmp.def.h tramNonSmp.decl.h : tramNonSmp.ci
+	$(CHARMC) tramNonSmp.ci
 
 libhtram.a: htram.o
 	$(CHARMC) htram.o -o libhtram.a -language charm++ 
