@@ -61,9 +61,11 @@ void HTramRecv::receive(HTramMessage* agg_message) {
 #if 0
     HTramMessage* tmpMsg = new HTramMessage(agg_message->next, agg_message->buffer);
     htramProxy[i].receivePerPE(tmpMsg);//converse message?
+#else
+    HTramMessage* tmpMsg = (HTramMessage*)CkReferenceMsg(agg_message);
+    _SET_USED(UsrToEnv(tmpMsg), 0);
+     htramProxy[i].receivePerPE(tmpMsg);//agg_message);
 #endif
-    _SET_USED(UsrToEnv(agg_message), 0);
-     htramProxy[i].receivePerPE(agg_message);
   }
 }
 
@@ -74,7 +76,7 @@ void HTram::receivePerPE(HTramMessage* msg) {
       cb(client_gid, objPtr, msg->buffer[i].payload);
     }
   }
-//  contribute(endCb);
+  CkFreeMsg(msg);
 }
 
 #include "htram.def.h"

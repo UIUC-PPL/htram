@@ -7,7 +7,7 @@ CHARMCFLAGS = $(OPTS) -O3
 all: $(BINARY)
 
 histo: histo.o
-	$(CHARMC) $(CHARMCFLAGS) libhtram.a -language charm++ -o $@ $+ -std=c++1z -g
+	$(CHARMC) $(CHARMCFLAGS) libhtram.a -language charm++ -o $@ $+ -std=c++1z
 
 .SECONDARY: $(patsubst %.C,%.decl.h,$(wildcard *.C))
 .SECONDARY: $(patsubst %.C,%.def.h,$(wildcard *.C))

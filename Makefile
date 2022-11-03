@@ -15,7 +15,7 @@ libhtram.a: htram.o
 	$(CHARMC) htram.o -o libhtram.a -language charm++ 
 
 htram.o : htram.C htram.def.h htram.decl.h
-	$(CHARMC) -c htram.C -g
+	$(CHARMC) -c htram.C
 
 htram.def.h htram.decl.h : htram.ci
 	$(CHARMC) htram.ci
