@@ -51,14 +51,23 @@ public:
 
   void start() {
     starttime = CkWallTimer();
-    CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
+    CkCallback endCb(CkIndex_TestDriver::start_buffered(), thisProxy);
     updater_array.generateUpdates();
     CkStartQD(endCb);
   }
 
+  void start_buffered() {
+    double update_walltime = CkWallTimer() - starttime;
+    CkPrintf("  [Item by Item Function Call using TRAM] %8.3lf seconds\n", update_walltime);
+  
+    starttime = CkWallTimer();
+    CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
+    updater_array.generateUpdates();
+    CkStartQD(endCb);  }
+
   void startVerificationPhase() {
     double update_walltime = CkWallTimer() - starttime;
-    CkPrintf("  %8.3lf seconds\n", update_walltime);
+    CkPrintf("  [Buffered item Function Call using TRAM] %8.3lf seconds\n", update_walltime);
 
     // Repeat the update process to verify
     // At the end of the second update phase, check the global table
@@ -124,12 +133,22 @@ public:
     counts[key]++;
   }
 
+  inline void insertDataItems(tramNonSmpMsg<CmiInt8>* msg) {
+    int limit = msg->next;
+    for (int i = 0; i != limit; ++i)
+      insertData(msg->payload_buffer[i]);
+  }
+
   inline void insertData2(const CmiInt8& key) {
-    counts[key]--;
+    counts[key] -= 2;
   }
 
   static void insertDataCaller(void* p, CmiInt8 const& key) {
     ((Updater *)p)->insertData(key);
+  }
+
+  static void insertDataBuffered(void* p, tramNonSmpMsg<CmiInt8>* msg) {
+    ((Updater *)p)->insertDataItems(msg);
   }
 
   static void insertData2Caller(void* p, CmiInt8 const& key) {
@@ -141,6 +160,27 @@ public:
     CmiInt8 pe, col;
     tramNonSmp<CmiInt8>* tram = tramNonSmpProxy.ckLocalBranch();
     tram->set_func_ptr(Updater::insertDataCaller, this);
+
+    //CkPrintf("[%d] Hi from generateUpdates %d, l_num_ups: %d\n", CkMyPe(),thisIndex, l_num_ups);
+    for(CmiInt8 i = 0; i < l_num_ups; i++) {
+      col = pckindx[i] >> 16;
+      pe  = pckindx[i] & 0xffff;
+      // Submit generated key to chare owning that portion of the table
+//      thisProxy(pe).insertData(col);
+      tram->insertValue(col, pe);
+
+      if  ((i % 10000) == 9999) CthYield();
+//      userDeliver(0);
+    }
+    tram->tflush();
+  }
+
+  void generateUpdatesBuffered() {
+    // Generate this chare's share of global updates
+    CmiInt8 pe, col;
+    tramNonSmp<CmiInt8>* tram = tramNonSmpProxy.ckLocalBranch();
+    tram->set_buffered_func_ptr(Updater::insertDataBuffered, this);
+    tram->set_itemized(false);
 
     //CkPrintf("[%d] Hi from generateUpdates %d, l_num_ups: %d\n", CkMyPe(),thisIndex, l_num_ups);
     for(CmiInt8 i = 0; i < l_num_ups; i++) {

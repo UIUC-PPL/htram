@@ -14,6 +14,7 @@ mainmodule histo_nonSmp {
   mainchare TestDriver {
     entry TestDriver (CkArgMsg *args);
     entry [reductiontarget] void start();
+    entry [reductiontarget] void start_buffered();
     entry [reductiontarget] void startVerificationPhase();
     entry [reductiontarget] void reportErrors(CmiInt8 globalNumErrors);
   };

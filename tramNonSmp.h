@@ -25,10 +25,14 @@ class tramNonSmp : public CBase_tramNonSmp<T> {
 private:
     using value_type = T;
     using function_ptr = void (*)(void*, value_type const&);
+    using buff_function_ptr = void(*)(void*, tramNonSmpMsg<value_type>*);
 
     function_ptr func_ptr;
+    buff_function_ptr buff_func_ptr;
     void* obj_ptr;
     tramNonSmpMsg<value_type> **msgBuffers;
+
+    bool is_itemized;
 
 public:
     tramNonSmp(CkMigrateMessage* msg);
@@ -37,6 +41,8 @@ public:
 
     // Locally accessed function
     void set_func_ptr(function_ptr fptr, void* optr);
+    void set_buffered_func_ptr(buff_function_ptr fptr, void* optr);
+    void set_itemized(bool value);
 
     // Entry methods
     void insertValue(value_type const& value, int dest_pe);
@@ -48,7 +54,7 @@ template <typename T>
 tramNonSmp<T>::tramNonSmp(CkMigrateMessage* msg) {}
 
 template <typename T>
-tramNonSmp<T>::tramNonSmp() : func_ptr(nullptr), obj_ptr(nullptr) {
+tramNonSmp<T>::tramNonSmp() : func_ptr(nullptr), obj_ptr(nullptr), is_itemized(true) {
     msgBuffers = new tramNonSmpMsg<value_type>*[CkNumPes()];
     for (int i = 0; i != CkNumPes(); ++i)
         msgBuffers[i] = new tramNonSmpMsg<value_type>();
@@ -58,6 +64,17 @@ template <typename T>
 void tramNonSmp<T>::set_func_ptr(function_ptr fptr, void* optr) {
     func_ptr = fptr;
     obj_ptr = optr;
+}
+
+template <typename T>
+void tramNonSmp<T>::set_buffered_func_ptr(buff_function_ptr fptr, void* optr) {
+    buff_func_ptr = fptr;
+    obj_ptr = optr;
+}
+
+template <typename T>
+void tramNonSmp<T>::set_itemized(bool value) {
+    is_itemized = value;
 }
 
 template <typename T>
@@ -86,9 +103,12 @@ template <typename T>
 void tramNonSmp<T>::receive(tramNonSmpMsg<T>* msg) {
     // Call the callback function
     int limit = msg->next;
-    for (int i = 0; i != limit; ++i) {
-        func_ptr(obj_ptr, msg->payload_buffer[i]);
-    }
+    if (is_itemized)
+        for (int i = 0; i != limit; ++i) {
+            func_ptr(obj_ptr, msg->payload_buffer[i]);
+        }
+    else
+        buff_func_ptr(obj_ptr, msg);
 }
 
 #define CK_TEMPLATES_ONLY
