@@ -100,7 +100,7 @@ private:
 public:
   Updater() {
     // Compute table start for this chare
-    CkPrintf("[PE%d] Update (thisIndex=%d) created: lnum_counts = %d, l_num_ups =%d\n", CkMyPe(), thisIndex, lnum_counts, l_num_ups);
+    // CkPrintf("[PE%d] Update (thisIndex=%d) created: lnum_counts = %d, l_num_ups =%d\n", CkMyPe(), thisIndex, lnum_counts, l_num_ups);
 
     srand(thisIndex + 120348);
     // Create table;
