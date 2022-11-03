@@ -42,7 +42,7 @@ void HTram::insertValue(int value, int dest_pe) {
 
 void HTram::tflush() {
   for(int i=0;i<CkNumNodes();i++) {
-    nodeGrpProxy[i].receive(msgBuffers[i]);
+    nodeGrpProxy[i].receive(msgBuffers[i]); //only upto next
     msgBuffers[i] = new HTramMessage();
   }
 }
@@ -58,8 +58,12 @@ void HTramRecv::receive(HTramMessage* agg_message) {
   //nodegroup //reference from group
   
   for(int i=CkNodeFirst(CkMyNode()); i < CkNodeFirst(CkMyNode())+CkNodeSize(0);i++) {
+#if 0
     HTramMessage* tmpMsg = new HTramMessage(agg_message->next, agg_message->buffer);
-    htramProxy[i].receivePerPE(tmpMsg);
+    htramProxy[i].receivePerPE(tmpMsg);//converse message?
+#endif
+    _SET_USED(UsrToEnv(agg_message), 0);
+     htramProxy[i].receivePerPE(agg_message);
   }
 }
 

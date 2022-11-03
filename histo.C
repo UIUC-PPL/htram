@@ -166,7 +166,7 @@ public:
       // Submit generated key to chare owning that portion of the table
 //      thisProxy(pe).insertData(col);
       htram->insertValue(col, pe);
-//      userDeliver(0);
+      if  ((i % 10000) == 9999) CthYield();
     }
     htram->tflush();
     //contribute(CkCallback(CkReductionTarget(TestDriver, startVerificationPhase), driverProxy));
