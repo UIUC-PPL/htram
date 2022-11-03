@@ -1,5 +1,9 @@
-mainmodule histo {
+mainmodule histo_nonSmp {
   extern module tramNonSmp;
+  group tramNonSmp<CmiInt8>;
+  message tramNonSmpMsg<CmiInt8>;
+
+  readonly CProxy_tramNonSmp<CmiInt8> tramNonSmpProxy;
 
   // Handle to the test driver (chare)
   readonly CProxy_TestDriver               driverProxy;

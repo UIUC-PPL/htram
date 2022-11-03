@@ -1,15 +1,16 @@
 module tramNonSmp {
-  readonly CProxy_tramNonSmp tramNonSmpProxy;
 
+  template <typename T>
   message tramNonSmpMsg {
     int next;
-    CmiInt8* payload_buffer;
+    T* payload_buffer;
   };
 
+  template <typename T>
   group tramNonSmp {
     entry tramNonSmp();
-    entry void insertValue(int value, int destPE);
+    entry void insertValue(T const& value, int dest_pe);
     entry void tflush(); 
-    entry void receive(tramNonSmpMsg*);
+    entry void receive(tramNonSmpMsg<T>*);
   };
 };

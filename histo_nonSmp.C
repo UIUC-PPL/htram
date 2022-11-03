@@ -3,12 +3,12 @@
 typedef CmiUInt8 dtype;
 #include "TopoManager.h"
 #include "tramNonSmp.h"
-#include "histo.decl.h"
+#include "histo_nonSmp.decl.h"
 
 #include <assert.h>
 // Handle to the test driver (chare)
 CProxy_TestDriver driverProxy;
-/* readonly */ CProxy_tramNonSmp tramNonSmpProxy;
+/* readonly */ CProxy_tramNonSmp<CmiInt8> tramNonSmpProxy;
 
 int l_num_ups = 1000000;     // per thread number of requests (updates)
 int lnum_counts = 1000;       // per thread size of the table
@@ -39,7 +39,7 @@ public:
     CkPrintf("Table size / PE                  (-T)= %d\n", lnum_counts);
 
     driverProxy = thishandle;
-    tramNonSmpProxy = CProxy_tramNonSmp::ckNew();
+    tramNonSmpProxy = CProxy_tramNonSmp<CmiInt8>::ckNew();
 
     updater_array = CProxy_Updater::ckNew();
 
@@ -120,26 +120,26 @@ public:
   Updater(CkMigrateMessage *msg) {}
 
   // Communication library calls this to deliver each randomly generated key
-  void insertData(const CmiInt8& key) {
+  inline void insertData(const CmiInt8& key) {
     counts[key]++;
   }
 
-  void insertData2(const CmiInt8& key) {
+  inline void insertData2(const CmiInt8& key) {
     counts[key]--;
   }
 
-  static void insertDataCaller(void* p, CmiInt8 key) {
+  static void insertDataCaller(void* p, CmiInt8 const& key) {
     ((Updater *)p)->insertData(key);
   }
 
-  static void insertData2Caller(void* p, CmiInt8 key) {
+  static void insertData2Caller(void* p, CmiInt8 const& key) {
     ((Updater *)p)->insertData2(key);
   }
 
   void generateUpdates() {
     // Generate this chare's share of global updates
     CmiInt8 pe, col;
-    tramNonSmp* tram = tramNonSmpProxy.ckLocalBranch();
+    tramNonSmp<CmiInt8>* tram = tramNonSmpProxy.ckLocalBranch();
     tram->set_func_ptr(Updater::insertDataCaller, this);
 
     //CkPrintf("[%d] Hi from generateUpdates %d, l_num_ups: %d\n", CkMyPe(),thisIndex, l_num_ups);
@@ -160,7 +160,7 @@ public:
   
     // Generate this chare's share of global updates
     CmiInt8 pe, col;
-    tramNonSmp* tram = tramNonSmpProxy.ckLocalBranch();
+    tramNonSmp<CmiInt8>* tram = tramNonSmpProxy.ckLocalBranch();
     tram->set_func_ptr(Updater::insertData2Caller, this);
     //CkPrintf("[%d] Hi from generateUpdatesVerify %d, l_num_ups: %d\n", CkMyPe(),thisIndex, l_num_ups);
     for(CmiInt8 i = 0; i < l_num_ups; i++) {
@@ -192,5 +192,4 @@ public:
   }
 };
 
-#include "tramNonSmp.def.h"
-#include "histo.def.h"
+#include "histo_nonSmp.def.h"

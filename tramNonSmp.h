@@ -3,11 +3,12 @@
 
 #include "tramNonSmp.decl.h"
 
-/* readonly */ extern CProxy_tramNonSmp tramNonSmpProxy;
-
 #define PAYLOAD_BUFFER_SIZE 1024
 
-struct tramNonSmpMsg : public CMessage_tramNonSmpMsg {
+template <typename T>
+struct tramNonSmpMsg : public CMessage_tramNonSmpMsg<T> {
+
+    using value_type = T;
 
     tramNonSmpMsg() : next(0) {}
 
@@ -16,28 +17,82 @@ struct tramNonSmpMsg : public CMessage_tramNonSmpMsg {
     }
 
     int next;
-    CmiInt8 payload_buffer[PAYLOAD_BUFFER_SIZE];
+    value_type payload_buffer[PAYLOAD_BUFFER_SIZE];
 };
 
-class tramNonSmp : public CBase_tramNonSmp {
+template <typename T>
+class tramNonSmp : public CBase_tramNonSmp<T> {
 private:
-    using function_ptr = void (*)(void*, CmiInt8);
+    using value_type = T;
+    using function_ptr = void (*)(void*, value_type const&);
 
     function_ptr func_ptr;
     void* obj_ptr;
-    tramNonSmpMsg **msgBuffers;
+    tramNonSmpMsg<value_type> **msgBuffers;
 
 public:
     tramNonSmp(CkMigrateMessage* msg);
+    
     tramNonSmp();
 
     // Locally accessed function
-    void set_func_ptr(function_ptr ptr, void* obj_ptr);
+    void set_func_ptr(function_ptr fptr, void* optr);
 
     // Entry methods
-    void insertValue(int send_value, int dest_pe);
+    void insertValue(value_type const& value, int dest_pe);
     void tflush();
-    void receive(tramNonSmpMsg *);
+    void receive(tramNonSmpMsg<value_type>* msg);
 };
+
+template <typename T>
+tramNonSmp<T>::tramNonSmp(CkMigrateMessage* msg) {}
+
+template <typename T>
+tramNonSmp<T>::tramNonSmp() : func_ptr(nullptr), obj_ptr(nullptr) {
+    msgBuffers = new tramNonSmpMsg<value_type>*[CkNumPes()];
+    for (int i = 0; i != CkNumPes(); ++i)
+        msgBuffers[i] = new tramNonSmpMsg<value_type>();
+}
+
+template <typename T>
+void tramNonSmp<T>::set_func_ptr(function_ptr fptr, void* optr) {
+    func_ptr = fptr;
+    obj_ptr = optr;
+}
+
+template <typename T>
+void tramNonSmp<T>::insertValue(value_type const& value, int dest_pe) {
+    // Buffer the message
+    tramNonSmpMsg<value_type>* destMsg = msgBuffers[dest_pe];
+    destMsg->payload_buffer[destMsg->next] = value;
+    destMsg->next++;
+
+    if (destMsg->next == PAYLOAD_BUFFER_SIZE) {
+        // Flush message to destination PE if its filled
+        this->thisProxy[dest_pe].receive(destMsg);
+        msgBuffers[dest_pe] = new tramNonSmpMsg<value_type>();
+    }
+}
+
+template <typename T>
+void tramNonSmp<T>::tflush() {
+    for (int i = 0; i < CkNumPes(); ++i) {
+        this->thisProxy[i].receive(msgBuffers[i]);
+        msgBuffers[i] = new tramNonSmpMsg<value_type>();
+    }
+}
+
+template <typename T>
+void tramNonSmp<T>::receive(tramNonSmpMsg<T>* msg) {
+    // Call the callback function
+    int limit = msg->next;
+    for (int i = 0; i != limit; ++i) {
+        func_ptr(obj_ptr, msg->payload_buffer[i]);
+    }
+}
+
+#define CK_TEMPLATES_ONLY
+#include "tramNonSmp.def.h"
+#undef CK_TEMPLATES_ONLY
 
 #endif
