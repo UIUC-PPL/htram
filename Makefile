@@ -1,4 +1,4 @@
-CHARMC=../../../bin/charmc $(OPTS)
+CHARMC=../../../bin/charmc $(OPTS) -O3
 
 all: libhtram.a libtramnonsmp.a
 
@@ -20,8 +20,14 @@ htram.o : htram.C htram.def.h htram.decl.h
 htram.def.h htram.decl.h : htram.ci
 	$(CHARMC) htram.ci
 
-test: all
-	./charmrun +p16 ./driver  ++local +setcpuaffinity ++ppn 4
+libhtram_group.a: htram_group.o
+	$(CHARMC) htram_group.o -o libhtram_group.a -language charm++
+
+htram_group.o : htram_group.C htram_group.def.h htram_group.decl.h
+	$(CHARMC) -c htram_group.C
+
+htram_group.def.h htram_group.decl.h : htram_group.ci
+	$(CHARMC) htram_group.ci
 
 clean:
 	rm -f *.def.h *.decl.h

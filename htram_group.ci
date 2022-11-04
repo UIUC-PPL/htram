@@ -1,4 +1,4 @@
-module htram{
+module htram_group{
   readonly CProxy_HTram htramProxy;
   readonly CProxy_HTramRecv nodeGrpProxy;
   message HTramMessage {

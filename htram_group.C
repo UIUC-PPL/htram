@@ -1,4 +1,4 @@
-#include "htram.h"
+#include "htram_group.h"
 //#define DEBUG 1
 HTram::HTram(CkGroupID cgid, CkCallback ecb){
   client_gid = cgid;
@@ -108,5 +108,5 @@ void HTram::receivePerPE(HTramNodeMessage* msg) {
   CkFreeMsg(msg);
 }
 
-#include "htram.def.h"
+#include "htram_group.def.h"
 

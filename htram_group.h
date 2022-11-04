@@ -1,6 +1,6 @@
 #ifndef __HTRAM_H__
 #define __HTRAM_H__
-#include "htram.decl.h"
+#include "htram_group.decl.h"
 /* readonly */ extern CProxy_HTram htramProxy;
 /* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
 

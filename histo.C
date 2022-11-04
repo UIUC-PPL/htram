@@ -3,7 +3,12 @@
 typedef CmiUInt8 dtype;
 #include "histo.decl.h"
 #include "TopoManager.h"
+
+#if GROUPBY
+#include "htram_group.h"
+#else
 #include "htram.h"
+#endif
 
 #include <assert.h>
 // Handle to the test driver (chare)
@@ -83,8 +88,6 @@ public:
   }
 };
 
-
-#define PPN_COUNT 64
 
 // Chare Array with multiple chares on each PE
 // Each chare: owns a portion of the global table

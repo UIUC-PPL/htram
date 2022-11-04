@@ -1,5 +1,9 @@
 mainmodule histo {
+#if GROUPBY
+  extern module htram_group;
+#else
   extern module htram;
+#endif
   // Handle to the test driver (chare)
   readonly CProxy_TestDriver               driverProxy;
   // Number of chares per PE
