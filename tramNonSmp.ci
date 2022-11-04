@@ -3,12 +3,13 @@ module tramNonSmp {
   template <typename T>
   message tramNonSmpMsg {
     int next;
-    T* payload_buffer;
+    T payload_buffer[];
   };
 
   template <typename T>
   group tramNonSmp {
     entry tramNonSmp();
+    entry tramNonSmp(int);
     entry void insertValue(T const& value, int dest_pe);
     entry void tflush(); 
     entry void receive(tramNonSmpMsg<T>*);

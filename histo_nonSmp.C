@@ -12,6 +12,7 @@ CProxy_TestDriver driverProxy;
 
 int l_num_ups = 1000000;     // per thread number of requests (updates)
 int lnum_counts = 1000;       // per thread size of the table
+int l_buffer_size = 1024;
 
 void deliverCallback(CkGroupID gid, void* objPtr, int payload);
 void deliverCallbackVerify(CkGroupID gid, void* objPtr, int payload);
@@ -25,11 +26,13 @@ public:
   TestDriver(CkArgMsg* args) {
     int64_t printhelp = 0;
     int opt;
-    while( (opt = getopt(args->argc, args->argv, "hn:T:")) != -1 ) {
+
+    while( (opt = getopt(args->argc, args->argv, "hn:T:S:")) != -1 ) {
       switch(opt) {
       case 'h': printhelp = 1; break;
       case 'n': sscanf(optarg,"%d" ,&l_num_ups);  break;
       case 'T': sscanf(optarg,"%d" ,&lnum_counts);  break;
+      case 'S': sscanf(optarg, "%d", &l_buffer_size); break;
       default:  break;
       }
     }
@@ -39,7 +42,7 @@ public:
     CkPrintf("Table size / PE                  (-T)= %d\n", lnum_counts);
 
     driverProxy = thishandle;
-    tramNonSmpProxy = CProxy_tramNonSmp<CmiInt8>::ckNew();
+    tramNonSmpProxy = CProxy_tramNonSmp<CmiInt8>::ckNew(l_buffer_size);
 
     updater_array = CProxy_Updater::ckNew();
 
