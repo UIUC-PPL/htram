@@ -1,3 +1,4 @@
+//#define SORT 1
 module htram_group{
   readonly CProxy_HTram htramProxy;
   readonly CProxy_HTramRecv nodeGrpProxy;
@@ -15,7 +16,11 @@ module htram_group{
     entry HTram(CkGroupID gid, CkCallback cb);
     entry void insertValue(int value, int destPE);
     entry void tflush(); 
+#if SORT
+    entry void receivePerPE(HTramMessage*);
+#else
     entry void receivePerPE(HTramNodeMessage*);
+#endif
   };
 
   nodegroup HTramRecv {

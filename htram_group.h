@@ -7,6 +7,7 @@
 using namespace std;
 #define BUFSIZE 1024
 #define PPN_COUNT 32
+//#define SORT 1
 
 typedef struct item {
   int destPe;
@@ -20,6 +21,10 @@ class HTramMessage : public CMessage_HTramMessage {
       std::copy(buf, buf+size, buffer);
     }
     itemT buffer[BUFSIZE];
+#if SORT
+    int lrange[PPN_COUNT];
+    int urange[PPN_COUNT];
+#endif
     int next; //next available slot in buffer
 };
 
@@ -50,7 +55,11 @@ class HTram : public CBase_HTram {
     int getAggregatingPE(int dest_pe);
     void insertValue(int send_value, int dest_pe);
     void tflush();
+#if SORT
+    void receivePerPE(HTramMessage *);
+#else
     void receivePerPE(HTramNodeMessage *);
+#endif
 };
 
 
