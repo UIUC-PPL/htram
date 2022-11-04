@@ -54,7 +54,7 @@ public:
 
   void start() {
     starttime = CkWallTimer();
-    CkCallback endCb(CkIndex_TestDriver::start_buffered(), thisProxy);
+    CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
     updater_array.generateUpdates();
     CkStartQD(endCb);
   }
@@ -70,7 +70,7 @@ public:
 
   void startVerificationPhase() {
     double update_walltime = CkWallTimer() - starttime;
-    CkPrintf("  [Buffered item Function Call using TRAM] %8.3lf seconds\n", update_walltime);
+    CkPrintf("   %8.3lf seconds\n", update_walltime);
 
     // Repeat the update process to verify
     // At the end of the second update phase, check the global table
@@ -143,7 +143,7 @@ public:
   }
 
   inline void insertData2(const CmiInt8& key) {
-    counts[key] -= 2;
+    counts[key]--;
   }
 
   static void insertDataCaller(void* p, CmiInt8 const& key) {
