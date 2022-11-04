@@ -12,6 +12,7 @@ CProxy_TestDriver driverProxy;
 
 int l_num_ups = 1000000;     // per thread number of requests (updates)
 int lnum_counts = 1000;       // per thread size of the table
+int l_buffer_size = 1024;
 
 void deliverCallback(CkGroupID gid, void* objPtr, int payload);
 void deliverCallbackVerify(CkGroupID gid, void* objPtr, int payload);
@@ -25,11 +26,13 @@ public:
   TestDriver(CkArgMsg* args) {
     int64_t printhelp = 0;
     int opt;
-    while( (opt = getopt(args->argc, args->argv, "hn:T:")) != -1 ) {
+
+    while( (opt = getopt(args->argc, args->argv, "hn:T:S:")) != -1 ) {
       switch(opt) {
       case 'h': printhelp = 1; break;
       case 'n': sscanf(optarg,"%d" ,&l_num_ups);  break;
       case 'T': sscanf(optarg,"%d" ,&lnum_counts);  break;
+      case 'S': sscanf(optarg, "%d", &l_buffer_size); break;
       default:  break;
       }
     }
@@ -39,7 +42,7 @@ public:
     CkPrintf("Table size / PE                  (-T)= %d\n", lnum_counts);
 
     driverProxy = thishandle;
-    tramNonSmpProxy = CProxy_tramNonSmp<CmiInt8>::ckNew();
+    tramNonSmpProxy = CProxy_tramNonSmp<CmiInt8>::ckNew(l_buffer_size);
 
     updater_array = CProxy_Updater::ckNew();
 
@@ -56,9 +59,18 @@ public:
     CkStartQD(endCb);
   }
 
+  void start_buffered() {
+    double update_walltime = CkWallTimer() - starttime;
+    CkPrintf("  [Item by Item Function Call using TRAM] %8.3lf seconds\n", update_walltime);
+  
+    starttime = CkWallTimer();
+    CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
+    updater_array.generateUpdates();
+    CkStartQD(endCb);  }
+
   void startVerificationPhase() {
     double update_walltime = CkWallTimer() - starttime;
-    CkPrintf("  %8.3lf seconds\n", update_walltime);
+    CkPrintf("   %8.3lf seconds\n", update_walltime);
 
     // Repeat the update process to verify
     // At the end of the second update phase, check the global table
@@ -91,7 +103,7 @@ private:
 public:
   Updater() {
     // Compute table start for this chare
-    CkPrintf("[PE%d] Update (thisIndex=%d) created: lnum_counts = %d, l_num_ups =%d\n", CkMyPe(), thisIndex, lnum_counts, l_num_ups);
+    // CkPrintf("[PE%d] Update (thisIndex=%d) created: lnum_counts = %d, l_num_ups =%d\n", CkMyPe(), thisIndex, lnum_counts, l_num_ups);
 
     srand(thisIndex + 120348);
     // Create table;
@@ -124,12 +136,22 @@ public:
     counts[key]++;
   }
 
+  inline void insertDataItems(tramNonSmpMsg<CmiInt8>* msg) {
+    int limit = msg->next;
+    for (int i = 0; i != limit; ++i)
+      insertData(msg->payload_buffer[i]);
+  }
+
   inline void insertData2(const CmiInt8& key) {
     counts[key]--;
   }
 
   static void insertDataCaller(void* p, CmiInt8 const& key) {
     ((Updater *)p)->insertData(key);
+  }
+
+  static void insertDataBuffered(void* p, tramNonSmpMsg<CmiInt8>* msg) {
+    ((Updater *)p)->insertDataItems(msg);
   }
 
   static void insertData2Caller(void* p, CmiInt8 const& key) {
@@ -141,6 +163,27 @@ public:
     CmiInt8 pe, col;
     tramNonSmp<CmiInt8>* tram = tramNonSmpProxy.ckLocalBranch();
     tram->set_func_ptr(Updater::insertDataCaller, this);
+
+    //CkPrintf("[%d] Hi from generateUpdates %d, l_num_ups: %d\n", CkMyPe(),thisIndex, l_num_ups);
+    for(CmiInt8 i = 0; i < l_num_ups; i++) {
+      col = pckindx[i] >> 16;
+      pe  = pckindx[i] & 0xffff;
+      // Submit generated key to chare owning that portion of the table
+//      thisProxy(pe).insertData(col);
+      tram->insertValue(col, pe);
+
+      if  ((i % 10000) == 9999) CthYield();
+//      userDeliver(0);
+    }
+    tram->tflush();
+  }
+
+  void generateUpdatesBuffered() {
+    // Generate this chare's share of global updates
+    CmiInt8 pe, col;
+    tramNonSmp<CmiInt8>* tram = tramNonSmpProxy.ckLocalBranch();
+    tram->set_buffered_func_ptr(Updater::insertDataBuffered, this);
+    tram->set_itemized(false);
 
     //CkPrintf("[%d] Hi from generateUpdates %d, l_num_ups: %d\n", CkMyPe(),thisIndex, l_num_ups);
     for(CmiInt8 i = 0; i < l_num_ups; i++) {

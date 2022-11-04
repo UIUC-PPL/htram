@@ -1,10 +1,18 @@
 -include ../../../common.mk
 CHARMC = ../../../bin/charmc
+NONSMP_CHARMC = ../../.../bin/charmc
 BINARY = histo
 
 CHARMCFLAGS = $(OPTS) -O3
 
 all: $(BINARY)
+
+histo_nonSmp: histo_nonSmp.ci histo_nonSmp.C histo_nonSmp.def.hi histo_nonSmp.decl.h
+	$(NONSMP_CHARMC) histo_nonSmp.ci
+	$(NONSMP_CHARMC) histo_nonSmp.C libtramnonsmp.a -o histo_nonsmp.out -O3 -language charm++
+
+histo-non-smp-run:
+	./charmrun +p32 ./histo_nonsmp.out -n 1000000 -T 10000 +setcpuaffinity
 
 histo: histo.o
 	$(CHARMC) $(CHARMCFLAGS) libhtram.a -language charm++ -o $@ $+ -std=c++1z
