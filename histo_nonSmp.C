@@ -154,10 +154,6 @@ public:
     ((Updater *)p)->insertDataItems(msg);
   }
 
-  static void insertData2Caller(void* p, CmiInt8 const& key) {
-    ((Updater *)p)->insertData2(key);
-  }
-
   void generateUpdates() {
     // Generate this chare's share of global updates
     CmiInt8 pe, col;
@@ -203,19 +199,15 @@ public:
   
     // Generate this chare's share of global updates
     CmiInt8 pe, col;
-    tramNonSmp<CmiInt8>* tram = tramNonSmpProxy.ckLocalBranch();
-    tram->set_func_ptr(Updater::insertData2Caller, this);
     //CkPrintf("[%d] Hi from generateUpdatesVerify %d, l_num_ups: %d\n", CkMyPe(),thisIndex, l_num_ups);
     for(CmiInt8 i = 0; i < l_num_ups; i++) {
       col = pckindx[i] >> 16;
       pe  = pckindx[i] & 0xffff;
       // Submit generated key to chare owning that portion of the table
-      //thisProxy(pe).insertData2(col);
-      tram->insertValue(col, pe);
+      thisProxy[pe].insertData2(col);
 
       if  ((i % 10000) == 9999) CthYield();
     }
-    tram->tflush();
   }
 
   void checkErrors() {
