@@ -1,6 +1,8 @@
 mainmodule histo {
 #if GROUPBY
   extern module htram_group;
+#elif SORTBY
+  extern module htram_sort;
 #else
   extern module htram;
 #endif

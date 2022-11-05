@@ -1,6 +1,6 @@
-#ifndef __HTRAM_H__
-#define __HTRAM_H__
-#include "htram_group.decl.h"
+#ifndef __HTRAM_SORT_H__
+#define __HTRAM_SORT_H__
+#include "htram_sort.decl.h"
 /* readonly */ extern CProxy_HTram htramProxy;
 /* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
 
@@ -20,6 +20,8 @@ class HTramMessage : public CMessage_HTramMessage {
       std::copy(buf, buf+size, buffer);
     }
     itemT buffer[BUFSIZE];
+    int lrange[PPN_COUNT];
+    int urange[PPN_COUNT];
     int next; //next available slot in buffer
 };
 
@@ -50,7 +52,7 @@ class HTram : public CBase_HTram {
     int getAggregatingPE(int dest_pe);
     void insertValue(int send_value, int dest_pe);
     void tflush();
-    void receivePerPE(HTramNodeMessage *);
+    void receivePerPE(HTramMessage *);
 };
 
 

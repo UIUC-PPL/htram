@@ -29,8 +29,17 @@ htram_group.o : htram_group.C htram_group.def.h htram_group.decl.h
 htram_group.def.h htram_group.decl.h : htram_group.ci
 	$(CHARMC) htram_group.ci
 
+libhtram_sort.a: htram_sort.o
+	$(CHARMC) htram_sort.o -o libhtram_sort.a -language charm++
+
+htram_sort.o : htram_sort.C htram_sort.def.h htram_sort.decl.h
+	$(CHARMC) -c htram_sort.C
+
+htram_sort.def.h htram_sort.decl.h : htram_sort.ci
+	$(CHARMC) htram_sort.ci
+
 clean:
 	rm -f *.def.h *.decl.h
 	rm -f *.log.gz *.projrc *.topo *.sts *.sum
-	rm libhtram.a
+	rm libhtram*.a
 

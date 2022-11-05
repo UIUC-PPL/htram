@@ -6,6 +6,8 @@ typedef CmiUInt8 dtype;
 
 #if GROUPBY
 #include "htram_group.h"
+#elif SORTBY
+#include "htram_sort.h"
 #else
 #include "htram.h"
 #endif

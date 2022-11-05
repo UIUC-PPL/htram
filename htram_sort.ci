@@ -1,4 +1,4 @@
-module htram_group{
+module htram_sort{
   readonly CProxy_HTram htramProxy;
   readonly CProxy_HTramRecv nodeGrpProxy;
   message HTramMessage {
@@ -15,7 +15,7 @@ module htram_group{
     entry HTram(CkGroupID gid, CkCallback cb);
     entry void insertValue(int value, int destPE);
     entry void tflush(); 
-    entry void receivePerPE(HTramNodeMessage*);
+    entry void receivePerPE(HTramMessage*);
   };
 
   nodegroup HTramRecv {
