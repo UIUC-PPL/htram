@@ -105,7 +105,7 @@ void HTram::receivePerPE(HTramNodeMessage* msg) {
   for(int i=llimit; i<ulimit;i++){
     cb(client_gid, objPtr, msg->buffer[i]);
   }
-  CkFreeMsg(msg);
+  delete msg;
 }
 
 #include "htram.def.h"

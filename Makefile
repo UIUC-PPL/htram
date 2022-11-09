@@ -1,13 +1,15 @@
-CHARMC=../../../bin/charmc $(OPTS)
-NONSMP_CHARMC=../../../bin/charmc $(OPTS)
+CHARMPATH=/project/projectdirs/m4167/finegrain/charm
+CHARMBUILD=gni-crayxc
+CHARMC=$(CHARMPATH)/$(CHARMBUILD)-smp/bin/charmc
+NONSMP_CHARMC=$(CHARMPATH)/$(CHARMBUILD)/bin/charmc
 
 all: libhtram.a libtramnonsmp.a
 
-libtramnonsmp.a : tramnonsmp.o
-	$(NONSMP_CHARMC) tramnonsmp.o -o libtramnonsmp.a -language charm++
+libtramnonsmp.a : tramNonSmp.o
+	$(NONSMP_CHARMC) tramNonSmp.o -o libtramnonsmp.a -language charm++
 
-tramnonsmp.o : tramNonSmp.C tramNonSmp.def.h tramNonSmp.decl.h
-	$(NONSMP_CHARMC) -c tramNonSmp.C -o tramnonsmp.o -g
+tramNonSmp.o : tramNonSmp.C tramNonSmp.def.h tramNonSmp.decl.h
+	$(NONSMP_CHARMC) -c tramNonSmp.C -o tramNonSmp.o -g
 
 tramNonSmp.def.h tramNonSmp.decl.h : tramNonSmp.ci
 	$(NONSMP_CHARMC) tramNonSmp.ci

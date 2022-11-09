@@ -1,21 +1,31 @@
--include ../../../common.mk
-CHARMC = ../../../bin/charmc
-NONSMP_CHARMC = ../../.../bin/charmc
-BINARY = histo
+CHARMPATH=/project/projectdirs/m4167/finegrain/charm
+CHARMBUILD=gni-crayxc
+CHARMC=$(CHARMPATH)/$(CHARMBUILD)-smp/bin/charmc
+NONSMP_CHARMC=$(CHARMPATH)/$(CHARMBUILD)/bin/charmc
+
+BINARY = histo_smp histo_nonSmp
 
 CHARMCFLAGS = $(OPTS) -O3
 
 all: $(BINARY)
 
-histo_nonSmp: histo_nonSmp.ci histo_nonSmp.C histo_nonSmp.def.hi histo_nonSmp.decl.h
+histo_nonSmp.decl.h histo_nonSmp.def.h: histo_nonSmp.ci
 	$(NONSMP_CHARMC) histo_nonSmp.ci
-	$(NONSMP_CHARMC) histo_nonSmp.C libtramnonsmp.a -o histo_nonsmp.out -O3 -language charm++
+
+histo_nonSmp: histo_nonSmp.ci histo_nonSmp.C histo_nonSmp.def.h histo_nonSmp.decl.h
+	$(NONSMP_CHARMC) histo_nonSmp.C libtramnonsmp.a -o histo_nonsmp -O3 -language charm++
+
+histo_nonSmp.prj: histo_nonSmp.ci histo_nonSmp.C histo_nonSmp.def.h histo_nonSmp.decl.h
+	$(NONSMP_CHARMC) histo_nonSmp.C libtramnonsmp.a -o histo_nonsmp -O3 -language charm++ -tracemode projections
+
 
 histo-non-smp-run:
-	./charmrun +p32 ./histo_nonsmp.out -n 1000000 -T 10000 +setcpuaffinity
+	./charmrun +p32 ./histo_nonsmp -n 1000000 -T 10000 +setcpuaffinity
 
 histo_smp: histo.o
 	$(CHARMC) $(CHARMCFLAGS) libhtram.a -language charm++ -o $@ $+ -std=c++1z
+histo_smp.prj: histo.o
+	$(CHARMC) $(CHARMCFLAGS) libhtram.a -language charm++ -o $@ $+ -std=c++1z -tracemode projections
 
 histo_smp_group: histo_group.o
 	$(CHARMC) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $+ -std=c++1z
@@ -26,7 +36,7 @@ histo_smp_sort: histo_sort.o
 .SECONDARY: $(patsubst %.C,%.decl.h,$(wildcard *.C))
 .SECONDARY: $(patsubst %.C,%.def.h,$(wildcard *.C))
 
-histo.def.h histo.decl.h: histo.ci.stamp
+histo.def.h histo.decl.h: histo.ci
 
 histo_g.def.h histo_g.decl.h: histo_g.ci.stamp
 
