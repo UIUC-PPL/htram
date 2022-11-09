@@ -16,7 +16,7 @@ histo_nonSmp: histo_nonSmp.ci histo_nonSmp.C histo_nonSmp.def.h histo_nonSmp.dec
 	$(NONSMP_CHARMC) histo_nonSmp.C libtramnonsmp.a -o histo_nonsmp -O3 -language charm++
 
 histo_nonSmp.prj: histo_nonSmp.ci histo_nonSmp.C histo_nonSmp.def.h histo_nonSmp.decl.h
-	$(NONSMP_CHARMC) histo_nonSmp.C libtramnonsmp.a -o histo_nonsmp -O3 -language charm++ -tracemode projections
+	$(NONSMP_CHARMC) histo_nonSmp.C libtramnonsmp.a -o histo_nonsmp.prj -O3 -language charm++ -tracemode projections
 
 
 histo-non-smp-run:
