@@ -1,7 +1,7 @@
 CHARMPATH=/project/projectdirs/m4167/finegrain/charm
-CHARMBUILD=gni-crayxc
-CHARMC=$(CHARMPATH)/$(CHARMBUILD)-smp/bin/charmc
-NONSMP_CHARMC=$(CHARMPATH)/$(CHARMBUILD)/bin/charmc
+CHARMBUILD=mpi-crayxc
+CHARMC=$(CHARMPATH)/$(CHARMBUILD)-smp/bin/charmc $(OPTS)
+NONSMP_CHARMC=$(CHARMPATH)/$(CHARMBUILD)/bin/charmc $(OPTS)
 
 all: libhtram.a libtramnonsmp.a
 

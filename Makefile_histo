@@ -1,7 +1,7 @@
 CHARMPATH=/project/projectdirs/m4167/finegrain/charm
-CHARMBUILD=gni-crayxc
-CHARMC=$(CHARMPATH)/$(CHARMBUILD)-smp/bin/charmc
-NONSMP_CHARMC=$(CHARMPATH)/$(CHARMBUILD)/bin/charmc
+CHARMBUILD=mpi-crayxc
+CHARMC=$(CHARMPATH)/$(CHARMBUILD)-smp/bin/charmc $(OPTS)
+NONSMP_CHARMC=$(CHARMPATH)/$(CHARMBUILD)/bin/charmc $(OPTS)
 
 BINARY = histo_smp histo_nonSmp
 
@@ -37,7 +37,8 @@ histo_smp_sort: histo_sort.o
 .SECONDARY: $(patsubst %.C,%.def.h,$(wildcard *.C))
 
 histo.def.h histo.decl.h: histo.ci
-
+	$(CHARMC) histo.ci
+	
 histo_g.def.h histo_g.decl.h: histo_g.ci.stamp
 
 histo_s.def.h histo_s.decl.h: histo_s.ci.stamp
