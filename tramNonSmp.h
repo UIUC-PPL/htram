@@ -39,6 +39,8 @@ protected:
 using buffer_t = int;
 TRAM_GENERATE_SINGLETON(buffer_t, payload_buffer_size);
 
+TRAM_GENERATE_SINGLETON(double, flush_timer);
+
 template <typename T>
 struct tramNonSmpMsg : public CMessage_tramNonSmpMsg<T> {
 
@@ -79,6 +81,7 @@ private:
     buff_function_ptr buff_func_ptr;
     void* obj_ptr;
     tramNonSmpMsg<value_type> **msgBuffers;
+    int time_to_flush;
 
     bool is_itemized;
 
@@ -89,14 +92,18 @@ public:
 
     tramNonSmp(int);
 
+    tramNonSmp(int, double);
+
     // Locally accessed function
     void set_func_ptr(function_ptr fptr, void* optr);
     void set_buffered_func_ptr(buff_function_ptr fptr, void* optr);
     void set_itemized(bool value);
+    void register_flush();
 
     // Entry methods
     void insertValue(value_type const& value, int dest_pe);
     void tflush();
+    void timed_flush();
     void receive(tramNonSmpMsg<value_type>* msg);
 };
 
@@ -107,6 +114,9 @@ template <typename T>
 tramNonSmp<T>::tramNonSmp() : func_ptr(nullptr), obj_ptr(nullptr), is_itemized(true) {
     buffer_t& buffer_size = TRAM_ACCESS_SINGLETON(payload_buffer_size);
     buffer_size = 1024;
+
+    time_to_flush = 0.5;
+    register_flush();
 
     // Question: Does this also needs to be double pointer? I think not.
     msgBuffers = new tramNonSmpMsg<value_type>*[CkNumPes()];
@@ -122,11 +132,46 @@ tramNonSmp<T>::tramNonSmp(int buffer_size_)
     buffer_t& buffer_size = TRAM_ACCESS_SINGLETON(payload_buffer_size);
     buffer_size = buffer_size_;
 
+    time_to_flush = 0.5;
+    register_flush();
+
     // Question: Does this also needs to be double pointer? I think not.
     msgBuffers = new tramNonSmpMsg<value_type>*[CkNumPes()];
 
     for (int i = 0; i != CkNumPes(); ++i)
         msgBuffers[i] = make_tram_msg<value_type>(buffer_size);
+}
+
+template <typename T>
+tramNonSmp<T>::tramNonSmp(int buffer_size_, double time_in_ms) 
+: func_ptr(nullptr), obj_ptr(nullptr), is_itemized(true) {
+
+    buffer_t& buffer_size = TRAM_ACCESS_SINGLETON(payload_buffer_size);
+    buffer_size = buffer_size_;
+
+    time_to_flush = time_in_ms;
+    register_flush();
+
+    // CcdCallFnAfter()
+
+    // Question: Does this also needs to be double pointer? I think not.
+    msgBuffers = new tramNonSmpMsg<value_type>*[CkNumPes()];
+
+    for (int i = 0; i != CkNumPes(); ++i)
+        msgBuffers[i] = make_tram_msg<value_type>(buffer_size);
+}
+
+template <typename T>
+void periodic_progress(void *htram_obj, double time) {
+    tramNonSmp<T> *proper_obj = static_cast<tramNonSmp<T>*>(htram_obj);
+
+    proper_obj->tflush();
+    proper_obj->register_flush();
+}
+
+template <typename T>
+void tramNonSmp<T>::register_flush() {
+    CcdCallFnAfter(periodic_progress<T>, (void *) this, time_to_flush);
 }
 
 template <typename T>
@@ -168,8 +213,10 @@ void tramNonSmp<T>::tflush() {
     buffer_t& buffer_size = TRAM_ACCESS_SINGLETON(payload_buffer_size);
 
     for (int i = 0; i < CkNumPes(); ++i) {
-        this->thisProxy[i].receive(msgBuffers[i]);
-        msgBuffers[i] = make_tram_msg<value_type>(buffer_size);
+        if (msgBuffers[i]->next) {
+            this->thisProxy[i].receive(msgBuffers[i]);
+            msgBuffers[i] = make_tram_msg<value_type>(buffer_size);
+        }
     }
 }
 

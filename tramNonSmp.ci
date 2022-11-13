@@ -10,6 +10,7 @@ module tramNonSmp {
   group tramNonSmp {
     entry tramNonSmp();
     entry tramNonSmp(int);
+    entry tramNonSmp(int, double);
     entry void insertValue(T const& value, int dest_pe);
     entry void tflush(); 
     entry void receive(tramNonSmpMsg<T>*);

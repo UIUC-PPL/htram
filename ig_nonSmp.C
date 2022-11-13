@@ -14,6 +14,8 @@ CProxy_TestDriver driverProxy;
 
 int ltab_siz = 100000;
 int l_num_req  = 1000000;      // number of requests per thread
+int l_buffer_size = 1024;
+double l_flush_timer = 0.5;
 
 class TestDriver : public CBase_TestDriver {
 private:
@@ -25,11 +27,13 @@ public:
   TestDriver(CkArgMsg* args) {
     int64_t printhelp = 0;
     int opt;
-    while( (opt = getopt(args->argc, args->argv, "hn:T:")) != -1 ) {
+    while( (opt = getopt(args->argc, args->argv, "hn:T:S:t:")) != -1 ) {
       switch(opt) {
       case 'h': printhelp = 1; break;
       case 'n': sscanf(optarg,"%d" ,&l_num_req);   break;
       case 'T': sscanf(optarg,"%d" ,&ltab_siz);   break;
+      case 'S': sscanf(optarg, "%d", &l_buffer_size); break;
+      case 't': sscanf(optarg, "%f", &l_flush_timer); break;
       default:  break;
       }
     }
@@ -39,8 +43,8 @@ public:
     CkPrintf("Table size / PE                  (-T)= %ld\n", ltab_siz);
 
     driverProxy = thishandle;
-    tram_request_proxy = CProxy_tramNonSmp<packet1>::ckNew();
-    tram_response_proxy = CProxy_tramNonSmp<packet2>::ckNew();
+    tram_request_proxy = CProxy_tramNonSmp<packet1>::ckNew(l_buffer_size, l_flush_timer);
+    tram_response_proxy = CProxy_tramNonSmp<packet2>::ckNew(l_buffer_size, l_flush_timer);
     // Create the chares storing and updating the global table
     //
     //updater_array = CProxy_Updater::ckNew(CkNumPes() * numElementsPerPe);
@@ -145,12 +149,12 @@ public:
     ((Updater *)obj_ptr)->myRequest(p);
   }
 
-  static void myResponseCaller(void* obj_ptr, const packet2& p) {
-    ((Updater *)obj_ptr)->myResponse(p);
-  }
-
   inline void myResponse(const packet2& p) {
     tgt[p.idx] = p.val;
+  }
+
+  static void myResponseCaller(void* obj_ptr, const packet2& p) {
+    ((Updater *)obj_ptr)->myResponse(p);
   }
 
   void generateUpdates() {

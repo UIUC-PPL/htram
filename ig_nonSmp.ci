@@ -4,8 +4,8 @@ mainmodule ig_nonSmp {
   extern module tramNonSmp;
   group tramNonSmp<packet1>;
   group tramNonSmp<packet2>;
-  message tramNonSmp<packet1>;
-  message tramNonSmp<packet2>;
+  message tramNonSmpMsg<packet1>;
+  message tramNonSmpMsg<packet2>;
 
   readonly CProxy_tramNonSmp<packet1> tram_request_proxy;
   readonly CProxy_tramNonSmp<packet2> tram_response_proxy;
