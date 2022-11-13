@@ -33,6 +33,11 @@ CHARMRUN=${CHARMDIR}/bin/charmrun
 
 ${CHARMC} tramNonSmp.ci
 ${CHARMC} tramNonSmp.C -o libtramnonsmp.a -language charm++ -I$(pwd)
+
 ${CHARMC} histo_nonSmp.ci
 ${CHARMC} histo_nonSmp.C libtramnonsmp.a -o histo_nonsmp.out -O3 -language charm++ -I$(pwd)
-${CHARMRUN} +p2 ./histo_nonsmp.out -n${N} -T${T}
+# ${CHARMRUN} +p2 ./histo_nonsmp.out -n${N} -T${T}
+
+${CHARMC} ig_nonSmp.ci
+${CHARMC} ig_nonSmp.C libtramnonsmp.a -o ig_nonsmp.out -O3 -language charm++ -I$(pwd)
+# ${CHARMRUN} +p2 ./ig_nonsmp.out -n${N} -T${T}
