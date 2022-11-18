@@ -15,7 +15,7 @@ CProxy_TestDriver driverProxy;
 int ltab_siz = 100000;
 int l_num_req  = 1000000;      // number of requests per thread
 int l_buffer_size = 1024;
-double l_flush_timer = 0.5;
+int l_flush_timer = 500;
 
 class TestDriver : public CBase_TestDriver {
 private:
@@ -33,7 +33,7 @@ public:
       case 'n': sscanf(optarg,"%d" ,&l_num_req);   break;
       case 'T': sscanf(optarg,"%d" ,&ltab_siz);   break;
       case 'S': sscanf(optarg, "%d", &l_buffer_size); break;
-      case 't': sscanf(optarg, "%f", &l_flush_timer); break;
+      case 't': sscanf(optarg, "%d", &l_flush_timer); break;
       default:  break;
       }
     }
@@ -41,10 +41,11 @@ public:
     CkPrintf("Running ig on %d PEs\n", CkNumPes());
     CkPrintf("Number of Request / PE           (-n)= %ld\n", l_num_req );
     CkPrintf("Table size / PE                  (-T)= %ld\n", ltab_siz);
+    CkPrintf("TRAM Timed Flush enabled with flushes every %f us.\n", static_cast<double>(l_flush_timer)/1000);
 
     driverProxy = thishandle;
-    tram_request_proxy = CProxy_tramNonSmp<packet1>::ckNew(l_buffer_size, l_flush_timer);
-    tram_response_proxy = CProxy_tramNonSmp<packet2>::ckNew(l_buffer_size, l_flush_timer);
+    tram_request_proxy = CProxy_tramNonSmp<packet1>::ckNew(l_buffer_size, static_cast<double>(l_flush_timer)/1000);
+    tram_response_proxy = CProxy_tramNonSmp<packet2>::ckNew(l_buffer_size, static_cast<double>(l_flush_timer)/1000);
     // Create the chares storing and updating the global table
     //
     //updater_array = CProxy_Updater::ckNew(CkNumPes() * numElementsPerPe);
@@ -101,7 +102,7 @@ public:
   Updater() {
     // Compute table start for this chare
     //globalStartmyProc = thisIndex * localTableSize;
-    CkPrintf("[PE%d] Update (thisIndex=%d) created: ltab_siz = %d, l_num_req =%d\n", CkMyPe(), thisIndex, ltab_siz, l_num_req);
+    // CkPrintf("[PE%d] Update (thisIndex=%d) created: ltab_siz = %d, l_num_req =%d\n", CkMyPe(), thisIndex, ltab_siz, l_num_req);
 
     // Create table;
     table = (CmiInt8*)malloc(sizeof(CmiInt8) * ltab_siz); assert(table != NULL);

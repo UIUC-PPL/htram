@@ -12,6 +12,7 @@ module tramNonSmp {
     entry tramNonSmp(int);
     entry tramNonSmp(int, double);
     entry void insertValue(T const& value, int dest_pe);
+    entry void periodic_flush();
     entry void tflush(); 
     entry void receive(tramNonSmpMsg<T>*);
   };

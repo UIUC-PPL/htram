@@ -13,6 +13,8 @@ CProxy_TestDriver driverProxy;
 int l_num_ups = 1000000;     // per thread number of requests (updates)
 int lnum_counts = 1000;       // per thread size of the table
 int l_buffer_size = 1024;
+bool enable_buffer_flushing = false;
+int l_flush_timer = 500;
 
 void deliverCallback(CkGroupID gid, void* objPtr, int payload);
 void deliverCallbackVerify(CkGroupID gid, void* objPtr, int payload);
@@ -27,12 +29,14 @@ public:
     int64_t printhelp = 0;
     int opt;
 
-    while( (opt = getopt(args->argc, args->argv, "hn:T:S:")) != -1 ) {
+    while( (opt = getopt(args->argc, args->argv, "hen:T:S:t:")) != -1 ) {
       switch(opt) {
       case 'h': printhelp = 1; break;
+      case 'e': enable_buffer_flushing = true; break;
       case 'n': sscanf(optarg,"%d" ,&l_num_ups);  break;
       case 'T': sscanf(optarg,"%d" ,&lnum_counts);  break;
       case 'S': sscanf(optarg, "%d", &l_buffer_size); break;
+      case 't': sscanf(optarg, "%d", &l_flush_timer); break;
       default:  break;
       }
     }
@@ -40,9 +44,17 @@ public:
     CkPrintf("Running histo on %d PEs\n", CkNumPes());
     CkPrintf("Number updates / PE              (-n)= %d\n", l_num_ups);
     CkPrintf("Table size / PE                  (-T)= %d\n", lnum_counts);
+    CkPrintf("TRAM Buffer Size                 (-S)= %d\n", l_buffer_size);
+    if (enable_buffer_flushing) {
+      CkPrintf("TRAM Timed Flush enabled with flushes every %f us.\n", static_cast<double>(l_flush_timer)/1000);
+    }
 
     driverProxy = thishandle;
-    tramNonSmpProxy = CProxy_tramNonSmp<CmiInt8>::ckNew(l_buffer_size);
+
+    if (enable_buffer_flushing)
+      tramNonSmpProxy = CProxy_tramNonSmp<CmiInt8>::ckNew(l_buffer_size, static_cast<double>(l_flush_timer)/1000);
+    else
+      tramNonSmpProxy = CProxy_tramNonSmp<CmiInt8>::ckNew(l_buffer_size);
 
     updater_array = CProxy_Updater::ckNew();
 

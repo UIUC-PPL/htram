@@ -81,7 +81,9 @@ private:
     buff_function_ptr buff_func_ptr;
     void* obj_ptr;
     tramNonSmpMsg<value_type> **msgBuffers;
-    int time_to_flush;
+
+    bool enable_flushing;
+    double time_to_flush;
 
     bool is_itemized;
 
@@ -103,6 +105,7 @@ public:
     // Entry methods
     void insertValue(value_type const& value, int dest_pe);
     void tflush();
+    void periodic_flush();
     void timed_flush();
     void receive(tramNonSmpMsg<value_type>* msg);
 };
@@ -111,12 +114,14 @@ template <typename T>
 tramNonSmp<T>::tramNonSmp(CkMigrateMessage* msg) {}
 
 template <typename T>
-tramNonSmp<T>::tramNonSmp() : func_ptr(nullptr), obj_ptr(nullptr), is_itemized(true) {
+tramNonSmp<T>::tramNonSmp()
+  : func_ptr(nullptr)
+  , obj_ptr(nullptr)
+  , is_itemized(true)
+  , enable_flushing(false)
+  , time_to_flush(std::numeric_limits<double>::max()) {
     buffer_t& buffer_size = TRAM_ACCESS_SINGLETON(payload_buffer_size);
     buffer_size = 1024;
-
-    time_to_flush = 0.5;
-    register_flush();
 
     // Question: Does this also needs to be double pointer? I think not.
     msgBuffers = new tramNonSmpMsg<value_type>*[CkNumPes()];
@@ -127,13 +132,14 @@ tramNonSmp<T>::tramNonSmp() : func_ptr(nullptr), obj_ptr(nullptr), is_itemized(t
 
 template <typename T>
 tramNonSmp<T>::tramNonSmp(int buffer_size_) 
-: func_ptr(nullptr), obj_ptr(nullptr), is_itemized(true) {
+  : func_ptr(nullptr)
+  , obj_ptr(nullptr)
+  , is_itemized(true)
+  , enable_flushing(false)
+  , time_to_flush(std::numeric_limits<double>::max()) {
 
     buffer_t& buffer_size = TRAM_ACCESS_SINGLETON(payload_buffer_size);
     buffer_size = buffer_size_;
-
-    time_to_flush = 0.5;
-    register_flush();
 
     // Question: Does this also needs to be double pointer? I think not.
     msgBuffers = new tramNonSmpMsg<value_type>*[CkNumPes()];
@@ -144,7 +150,10 @@ tramNonSmp<T>::tramNonSmp(int buffer_size_)
 
 template <typename T>
 tramNonSmp<T>::tramNonSmp(int buffer_size_, double time_in_ms) 
-: func_ptr(nullptr), obj_ptr(nullptr), is_itemized(true) {
+  : func_ptr(nullptr)
+  , obj_ptr(nullptr)
+  , is_itemized(true)
+  , enable_flushing(true) {
 
     buffer_t& buffer_size = TRAM_ACCESS_SINGLETON(payload_buffer_size);
     buffer_size = buffer_size_;
@@ -165,7 +174,7 @@ template <typename T>
 void periodic_progress(void *htram_obj, double time) {
     tramNonSmp<T> *proper_obj = static_cast<tramNonSmp<T>*>(htram_obj);
 
-    proper_obj->tflush();
+    proper_obj->periodic_flush();
     proper_obj->register_flush();
 }
 
@@ -209,7 +218,7 @@ void tramNonSmp<T>::insertValue(value_type const& value, int dest_pe) {
 }
 
 template <typename T>
-void tramNonSmp<T>::tflush() {
+void tramNonSmp<T>::periodic_flush() {
     buffer_t& buffer_size = TRAM_ACCESS_SINGLETON(payload_buffer_size);
 
     for (int i = 0; i < CkNumPes(); ++i) {
@@ -217,6 +226,16 @@ void tramNonSmp<T>::tflush() {
             this->thisProxy[i].receive(msgBuffers[i]);
             msgBuffers[i] = make_tram_msg<value_type>(buffer_size);
         }
+    }
+}
+
+template <typename T>
+void tramNonSmp<T>::tflush() {
+    buffer_t& buffer_size = TRAM_ACCESS_SINGLETON(payload_buffer_size);
+
+    for (int i = 0; i < CkNumPes(); ++i) {
+        this->thisProxy[i].receive(msgBuffers[i]);
+        msgBuffers[i] = make_tram_msg<value_type>(buffer_size);       
     }
 }
 
