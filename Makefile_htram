@@ -1,0 +1,28 @@
+all: libhtram.a libtramnonsmp.a
+
+libtramnonsmp.a : tramNonSmp.o
+	$(CHARMC) tramNonSmp.o -o libtramnonsmp.a -language charm++
+
+tramNonSmp.o : tramNonSmp.C tramNonSmp.def.h tramNonSmp.decl.h
+	$(CHARMC) -c tramNonSmp.C -o tramNonSmp.o -g
+
+tramNonSmp.def.h tramNonSmp.decl.h : tramNonSmp.ci
+	$(CHARMC) tramNonSmp.ci
+
+libhtram.a: htram.o
+	$(CHARMC_SMP) htram.o -o libhtram.a -language charm++ 
+
+htram.o : htram.C htram.def.h htram.decl.h
+	$(CHARMC_SMP) -c htram.C
+
+htram.def.h htram.decl.h : htram.ci
+	$(CHARMC_SMP) htram.ci
+
+test-driver: all
+	./charmrun +p16 ./driver  ++local +setcpuaffinity ++ppn 4
+
+clean-libs:
+	rm -f *.def.h *.decl.h
+	rm -f *.log.gz *.projrc *.topo *.sts *.sum
+	rm libhtram.a libtramnonsmp.a
+
