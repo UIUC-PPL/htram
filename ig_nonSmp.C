@@ -146,7 +146,7 @@ public:
     // thisProxy(p.pe).myResponse(p2);
   }
 
-  static void myRequestCaller(void* obj_ptr, const packet1& p) {
+  static void myRequestCaller(void* obj_ptr, packet1 p) {
     ((Updater *)obj_ptr)->myRequest(p);
   }
 
@@ -154,7 +154,7 @@ public:
     tgt[p.idx] = p.val;
   }
 
-  static void myResponseCaller(void* obj_ptr, const packet2& p) {
+  static void myResponseCaller(void* obj_ptr, packet2 p) {
     ((Updater *)obj_ptr)->myResponse(p);
   }
 
