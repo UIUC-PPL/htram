@@ -1,7 +1,7 @@
 #ifndef __HTRAM_SORT_H__
 #define __HTRAM_SORT_H__
 #include "htram_sort.decl.h"
-/* readonly */ extern CProxy_HTram htramProxy;
+/* readonly */ extern CProxy_HTram tram_proxy;
 /* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
 
 using namespace std;
@@ -33,7 +33,7 @@ class HTramNodeMessage : public CMessage_HTramNodeMessage {
     int offset[PPN_COUNT];
 };
 
-typedef void (*callback_function)(CkGroupID, void*, int);
+typedef void (*callback_function)(void*, int);
 
 class HTram : public CBase_HTram {
   HTram_SDAG_CODE
@@ -48,7 +48,7 @@ class HTram : public CBase_HTram {
   public:
     HTram(CkGroupID gid, CkCallback cb);
     HTram(CkMigrateMessage* msg);
-    void setCb(void (*func)(CkGroupID, void*, int), void*);
+    void set_func_ptr(void (*func)(void*, int), void*);
     int getAggregatingPE(int dest_pe);
     void insertValue(int send_value, int dest_pe);
     void tflush();

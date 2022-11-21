@@ -1,5 +1,5 @@
 module htram{
-  readonly CProxy_HTram htramProxy;
+  readonly CProxy_HTram tram_proxy;
   readonly CProxy_HTramRecv nodeGrpProxy;
   message HTramMessage {
     itemT *buffer;
@@ -12,6 +12,7 @@ module htram{
   };
 
   group HTram {
+    entry HTram(CkGroupID, int, bool, double);
     entry HTram(CkGroupID gid, CkCallback cb);
     entry void insertValue(int value, int destPE);
     entry void tflush(); 
