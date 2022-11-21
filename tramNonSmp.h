@@ -74,7 +74,7 @@ template <typename T>
 class tramNonSmp : public CBase_tramNonSmp<T> {
 private:
     using value_type = T;
-    using function_ptr = void (*)(void*, value_type const&);
+    using function_ptr = void (*)(void*, value_type);
     using buff_function_ptr = void(*)(void*, tramNonSmpMsg<value_type>*);
 
     function_ptr func_ptr;
@@ -84,6 +84,7 @@ private:
 
     bool enable_flushing;
     double time_to_flush;
+    int flush_counter = -1;
 
     bool is_itemized;
 
@@ -95,6 +96,8 @@ public:
     tramNonSmp(int);
 
     tramNonSmp(int, double);
+
+    tramNonSmp(CkGroupID, int, bool, double);
 
     // Locally accessed function
     void set_func_ptr(function_ptr fptr, void* optr);
@@ -108,6 +111,7 @@ public:
     void periodic_flush();
     void timed_flush();
     void receive(tramNonSmpMsg<value_type>* msg);
+    void num_flushes();
 };
 
 template <typename T>
@@ -171,6 +175,31 @@ tramNonSmp<T>::tramNonSmp(int buffer_size_, double time_in_ms)
 }
 
 template <typename T>
+tramNonSmp<T>::tramNonSmp(CkGroupID gid, int buffer_size_, bool enable_buffer_flushing, double time_in_ms) 
+  : func_ptr(nullptr)
+  , obj_ptr(nullptr)
+  , is_itemized(true)
+  , enable_flushing(enable_buffer_flushing)
+  , time_to_flush(std::numeric_limits<double>::max()) {
+
+    buffer_t& buffer_size = TRAM_ACCESS_SINGLETON(payload_buffer_size);
+    buffer_size = buffer_size_;
+
+    if (enable_flushing) {
+        time_to_flush = time_in_ms;
+        register_flush();
+    }
+
+    // CcdCallFnAfter()
+
+    // Question: Does this also needs to be double pointer? I think not.
+    msgBuffers = new tramNonSmpMsg<value_type>*[CkNumPes()];
+
+    for (int i = 0; i != CkNumPes(); ++i)
+        msgBuffers[i] = make_tram_msg<value_type>(buffer_size);
+}
+
+template <typename T>
 void periodic_progress(void *htram_obj, double time) {
     tramNonSmp<T> *proper_obj = static_cast<tramNonSmp<T>*>(htram_obj);
 
@@ -179,8 +208,16 @@ void periodic_progress(void *htram_obj, double time) {
 }
 
 template <typename T>
+void tramNonSmp<T>::num_flushes() {
+    ckout << "[PE:" << CkMyPe() << "] Flush Counter: " << flush_counter << endl;
+}
+
+template <typename T>
 void tramNonSmp<T>::register_flush() {
     CcdCallFnAfter(periodic_progress<T>, (void *) this, time_to_flush);
+
+    // TODO: Count the number of flushes here
+    ++flush_counter;
 }
 
 template <typename T>

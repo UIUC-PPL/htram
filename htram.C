@@ -1,5 +1,16 @@
 #include "htram.h"
 //#define DEBUG 1
+HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, double time_in_ms) {
+  // TODO: Implement variable buffer sizes and timed buffer flushing
+
+  client_gid = cgid;
+//  cb = delivercb;
+  myPE = CkMyPe();
+  msgBuffers = new HTramMessage*[CkNumNodes()];
+  for(int i=0;i<CkNumNodes();i++)
+    msgBuffers[i] = new HTramMessage();
+}
+
 HTram::HTram(CkGroupID cgid, CkCallback ecb){
   client_gid = cgid;
 //  cb = delivercb;
@@ -10,7 +21,7 @@ HTram::HTram(CkGroupID cgid, CkCallback ecb){
     msgBuffers[i] = new HTramMessage();
 }
 
-void HTram::setCb(void (*func)(CkGroupID, void*, int), void* obPtr) {
+void HTram::set_func_ptr(void (*func)(void*, int), void* obPtr) {
   cb = func;
   objPtr = obPtr;
 }
@@ -83,16 +94,16 @@ void HTramRecv::receive(HTramMessage* agg_message) {
   for(int i=CkNodeFirst(CkMyNode()); i < CkNodeFirst(CkMyNode())+CkNodeSize(0);i++) {
 #if 0
     HTramMessage* tmpMsg = new HTramMessage(agg_message->next, agg_message->buffer);
-    htramProxy[i].receivePerPE(tmpMsg);//converse message?
+    tram_proxy[i].receivePerPE(tmpMsg);//converse message?
 #elif 0
     HTramMessage* tmpMsg = (HTramMessage*)CkReferenceMsg(agg_message);
     _SET_USED(UsrToEnv(tmpMsg), 0);
-     htramProxy[i].receivePerPE(tmpMsg);//agg_message);
+     tram_proxy[i].receivePerPE(tmpMsg);//agg_message);
 #else
     
     HTramNodeMessage* tmpMsg = (HTramNodeMessage*)CkReferenceMsg(sorted_agg_message);
     _SET_USED(UsrToEnv(tmpMsg), 0);
-    htramProxy[i].receivePerPE(tmpMsg);
+    tram_proxy[i].receivePerPE(tmpMsg);
 #endif
   }
 }
@@ -103,7 +114,7 @@ void HTram::receivePerPE(HTramNodeMessage* msg) {
   if(rank > 0) llimit = msg->offset[rank-1];
   int ulimit = msg->offset[rank];
   for(int i=llimit; i<ulimit;i++){
-    cb(client_gid, objPtr, msg->buffer[i]);
+    cb(objPtr, msg->buffer[i]);
   }
   CkFreeMsg(msg);
 }
