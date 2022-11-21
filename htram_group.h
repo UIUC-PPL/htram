@@ -44,6 +44,7 @@ class HTram : public CBase_HTram {
     void* objPtr;
     HTramMessage **msgBuffers;
   public:
+    HTram(CkGroupID gid, int buffer_size, bool enable_timed_flushing, double flush_timer);
     HTram(CkGroupID gid, CkCallback cb);
     HTram(CkMigrateMessage* msg);
     void set_func_ptr(void (*func)(void*, int), void*);

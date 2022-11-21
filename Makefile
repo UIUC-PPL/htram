@@ -3,28 +3,40 @@
 
 CHARMCFLAGS = $(OPTS) -O3
 
-BINARY=histo_nonSmp
+BINARY=histo_nonSmp histo_smp_sort histo_smp_group histo_smp
 all: $(BINARY)
 
 include Makefile_htram
 
-histo_nonSmp.def histo_nonSmp.decl:
-	$(CHARMC) histo_nonSmp.ci
+.PHONY: histo_nonSmp histo_smp_sort histo_smp_group histo_smp
 
-histo_nonSmp: histo_nonSmp.ci histo_nonSmp.C histo_nonSmp.def histo_nonSmp.decl.h libtramnonsmp.a
-	$(CHARMC) histo_nonSmp.C libtramnonsmp.a -o histo_nonsmp -O3 -language charm++
+histo_smp_sort: histo.C histo.ci histo.decl.h histo.def.h libhtram_sort.a
+	$(CHARMC_SMP) histo.ci -DTRAM_SMP -DSORTBY
+	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_sort.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DSORTBY
 
-histo-non-smp-run:
-	./charmrun +p32 ./histo_nonsmp.out -n 1000000 -T 10000 +setcpuaffinity
+histo_smp_group: histo.C histo.ci histo.decl.h histo.def.h libhtram_group.a
+	$(CHARMC_SMP) histo.ci -DTRAM_SMP -DGROUPBY
+	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY 
 
-histo_smp: histo.o libhtram.a
-	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram.a -language charm++ -o $@ $+ -std=c++1z
+histo_smp: histo.C histo.ci histo.decl.h histo.def.h libhtram.a
+	$(CHARMC_SMP) histo.ci -DTRAM_SMP
+	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP
 
-histo_smp_group: histo_group.o
-	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $+ -std=c++1z
+histo_nonSmp: histo.C histo.ci histo.decl.h histo.def.h libtramnonsmp.a
+	$(CHARMC) histo.ci -DTRAM_NON_SMP
+	$(CHARMC) $(CHARMCFLAGS) libtramnonsmp.a -language charm++ -o $@ $< -std=c++1z -DTRAM_NON_SMP
 
-histo_smp_sort: histo_sort.o
-	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_sort.a -language charm++ -o $@ $+ -std=c++1z
+histo-non-smp-run: histo_nonSmp
+	./charmrun +p32 ./histo_nonSmp -n 1000000 -T 10000 +setcpuaffinity
+
+histo-smp-sort-run: histo_smp_sort
+	./charmrun +p32 ./histo_smp_sort -n 1000000 -T 10000 +setcpuaffinity
+
+histo-smp-group-run: histo_smp_group
+	./charmrun +p32 ./histo_smp_group -n 1000000 -T 10000 +setcpuaffinity
+
+histo-smp-run: histo_smp
+	./charmrun +p32 ./histo_smp -n 1000000 -T 10000 +setcpuaffinity
 
 ig_nonSmp.decl.h ig_nonSmp.def.h:
 	$(CHARMC) ig_nonSmp.ci
