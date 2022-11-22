@@ -77,7 +77,7 @@ private:
     using function_ptr = void (*)(void*, value_type);
     using buff_function_ptr = void(*)(void*, tramNonSmpMsg<value_type>*);
 
-    function_ptr func_ptr;
+    function_ptr func_ptr = nullptr;
     buff_function_ptr buff_func_ptr;
     void* obj_ptr;
     tramNonSmpMsg<value_type> **msgBuffers;
@@ -280,6 +280,9 @@ template <typename T>
 void tramNonSmp<T>::receive(tramNonSmpMsg<T>* msg) {
     // Call the callback function
     int limit = msg->next;
+    if (func_ptr != nullptr)
+        ckout << "Function Pointer not set yet." << endl;
+
     if (is_itemized)
         for (int i = 0; i != limit; ++i) {
             func_ptr(obj_ptr, msg->payload_buffer[i]);

@@ -87,7 +87,7 @@ public:
   void start() {
     starttime = CkWallTimer();
     CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
-    updater_array.preGenerateUpdates();
+    updater_array.generateUpdates();
     CkStartQD(endCb);
   }
 
@@ -164,17 +164,14 @@ public:
     ((Updater *)p)->insertData(key);
   }
 
-  void preGenerateUpdates() {
-    tram_t* tram = tram_proxy.ckLocalBranch();
-    tram->set_func_ptr(Updater::insertDataCaller, this);
-
-    contribute(CkCallback(CkReductionTarget(Updater, generateUpdates), thisProxy));
-  }
-
   void generateUpdates() {
     // Generate this chare's share of global updates
     CmiInt8 pe, col;
     tram_t* tram = tram_proxy.ckLocalBranch();
+    tram->set_func_ptr(Updater::insertDataCaller, this);
+
+    contribute(0, NULL, CkReduction::nop, CkCallbackResumeThread());
+    CthSuspend();
 
     for(CmiInt8 i = 0; i < l_num_ups; i++) {
       col = pckindx[i] >> 16;

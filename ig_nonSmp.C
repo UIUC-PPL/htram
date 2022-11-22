@@ -163,6 +163,7 @@ public:
     CmiInt8 pe, col;
     tram_request->set_func_ptr(Updater::myRequestCaller, this);
     tram_response->set_func_ptr(Updater::myResponseCaller, this);
+    contribute(0, NULL, CkReduction::nop, CkCallbackResumeThread());
 
     //CkPrintf("[%d] Hi from generateUpdates %d, l_num_ups: %d\n", CkMyPe(),thisIndex, l_num_req);
     packet1 p;

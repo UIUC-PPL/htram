@@ -41,8 +41,8 @@ histo-smp-run: histo_smp
 ig_nonSmp.decl.h ig_nonSmp.def.h:
 	$(CHARMC) ig_nonSmp.ci
 
-ig_nonSmp: ig_nonSmp.decl.h  ig_nonSmp.def.h tramNonSmp.decl.h libtramnonsmp.a
-	$(CHARMC) ig_nonSmp.C libtramnonsmp.a -O3 -language charm++  -o $@
+ig_nonSmp: ig_nonSmp.C ig_nonSmp.decl.h  ig_nonSmp.def.h tramNonSmp.decl.h libtramnonsmp.a
+	$(CHARMC) $< libtramnonsmp.a -O3 -language charm++  -o $@
 
 .SECONDARY: $(patsubst %.C,%.decl.h,$(wildcard *.C))
 .SECONDARY: $(patsubst %.C,%.def.h,$(wildcard *.C))
