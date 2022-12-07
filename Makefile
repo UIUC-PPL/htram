@@ -8,19 +8,11 @@ all: $(BINARY)
 
 include Makefile_htram
 
-.PHONY: histo_nonSmp histo_smp_sort histo_smp_group histo_smp
+.PHONY: histo_nonSmp histo_smp
 
-histo_smp_sort: histo.C histo.ci histo.decl.h histo.def.h libhtram_sort.a
-	$(CHARMC_SMP) histo.ci -DTRAM_SMP -DSORTBY
-	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_sort.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DSORTBY
-
-histo_smp_group: histo.C histo.ci histo.decl.h histo.def.h libhtram_group.a
+histo_smp: histo.C histo.ci histo.decl.h histo.def.h libhtram_group.a
 	$(CHARMC_SMP) histo.ci -DTRAM_SMP -DGROUPBY
 	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY 
-
-histo_smp: histo.C histo.ci histo.decl.h histo.def.h libhtram.a
-	$(CHARMC_SMP) histo.ci -DTRAM_SMP
-	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP
 
 histo_nonSmp: histo.C histo.ci histo.decl.h histo.def.h libtramnonsmp.a
 	$(CHARMC) histo.ci -DTRAM_NON_SMP
@@ -28,12 +20,6 @@ histo_nonSmp: histo.C histo.ci histo.decl.h histo.def.h libtramnonsmp.a
 
 histo-non-smp-run: histo_nonSmp
 	./charmrun +p32 ./histo_nonSmp -n 1000000 -T 10000 +setcpuaffinity
-
-histo-smp-sort-run: histo_smp_sort
-	./charmrun +p32 ./histo_smp_sort -n 1000000 -T 10000 +setcpuaffinity
-
-histo-smp-group-run: histo_smp_group
-	./charmrun +p32 ./histo_smp_group -n 1000000 -T 10000 +setcpuaffinity
 
 histo-smp-run: histo_smp
 	./charmrun +p32 ./histo_smp -n 1000000 -T 10000 +setcpuaffinity

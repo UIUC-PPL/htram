@@ -1,6 +1,6 @@
-all: libhtram_sort.a libhtram_group.a libhtram.a libtramnonsmp.a
+all: libhtram_group.a libtramnonsmp.a
 
-.PHONY: htram_sort.o htram_group.o htram.o tramNonSmp.o
+.PHONY: htram_group.o tramNonSmp.o
 
 libtramnonsmp.a : tramNonSmp.o
 	$(CHARMC) tramNonSmp.o -o libtramnonsmp.a -language charm++
@@ -11,15 +11,6 @@ tramNonSmp.o : tramNonSmp.C tramNonSmp.def.h tramNonSmp.decl.h
 tramNonSmp.def.h tramNonSmp.decl.h : tramNonSmp.ci
 	$(CHARMC) tramNonSmp.ci
 
-libhtram_sort.a: htram_sort.o
-	$(CHARMC_SMP) $< -o $@ -language charm++
-
-htram_sort.o: htram_sort.C htram_sort.def.h htram_sort.decl.h
-	$(CHARMC_SMP) -c htram_sort.C
-
-htram_sort.def.h htram_sort.decl.h: htram_sort.ci
-	$(CHARMC_SMP) htram_sort.ci
-
 libhtram_group.a: htram_group.o
 	$(CHARMC_SMP) $< -o $@ -language charm++
 
@@ -28,15 +19,6 @@ htram_group.o: htram_group.C htram_group.def.h htram_group.decl.h
 
 htram_group.def.h htram_group.decl.h: htram_group.ci
 	$(CHARMC_SMP) htram_group.ci
-
-libhtram.a: htram.o
-	$(CHARMC_SMP) $< -o $@ -language charm++
-
-htram.o : htram.C htram.def.h htram.decl.h
-	$(CHARMC_SMP) -c htram.C
-
-htram.def.h htram.decl.h : htram.ci
-	$(CHARMC_SMP) htram.ci
 
 test-driver: all
 	./charmrun +p16 ./driver  ++local +setcpuaffinity ++ppn 4
