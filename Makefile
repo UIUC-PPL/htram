@@ -3,7 +3,7 @@
 
 CHARMCFLAGS = $(OPTS) -O3
 
-BINARY=histo_nonSmp histo_smp_sort histo_smp_group histo_smp
+BINARY=histo_nonSmp histo_smp
 all: $(BINARY)
 
 include Makefile_htram
