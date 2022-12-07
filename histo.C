@@ -27,6 +27,7 @@ using tram_proxy_t = CProxy_HTram;
 using tram_t = HTram;
 
 /* readonly */ CProxy_HTramRecv nodeGrpProxy;
+/* readonly */ CProxy_HTramNodeGrp srcNodeGrpProxy;
 #elif TRAM_NON_SMP
 #include "tramNonSmp.h"
 
@@ -79,6 +80,7 @@ public:
 
 #ifdef TRAM_SMP
     nodeGrpProxy = CProxy_HTramRecv::ckNew();
+    srcNodeGrpProxy = CProxy_HTramNodeGrp::ckNew();
 #endif
 
     delete args;

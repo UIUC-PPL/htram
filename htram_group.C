@@ -1,4 +1,5 @@
 #include "htram_group.h"
+//#define NODE_SRC_BUFFER 1
 //#define DEBUG 1
 HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, double time_in_ms) {
   // TODO: Implement variable buffer sizes and timed buffer flushing
@@ -16,9 +17,11 @@ HTram::HTram(CkGroupID cgid, CkCallback ecb){
 //  cb = delivercb;
   endCb = ecb;
   myPE = CkMyPe();
+#ifndef NODE_SRC_BUFFER
   msgBuffers = new HTramMessage*[CkNumNodes()];
   for(int i=0;i<CkNumNodes();i++)
     msgBuffers[i] = new HTramMessage();
+#endif
 }
 
 void HTram::set_func_ptr(void (*func)(void*, int), void* obPtr) {
@@ -33,6 +36,12 @@ HTram::HTram(CkMigrateMessage* msg) {}
 void HTram::insertValue(int value, int dest_pe) {
   int destNode = dest_pe/CkNodeSize(0); //find safer way to find dest node,
   // node size is not always same
+#ifdef NODE_SRC_BUFFER
+  HTramNodeGrp* srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
+  msgBuffers = srcNodeGrp->msgBuffers;
+  CmiLock(srcNodeGrp->locks[destNode]);
+#endif
+
   HTramMessage *destMsg = msgBuffers[destNode];
   destMsg->buffer[destMsg->next].payload = value;
   destMsg->buffer[destMsg->next].destPe = dest_pe;
@@ -49,14 +58,39 @@ void HTram::insertValue(int value, int dest_pe) {
     nodeGrpProxy[destNode].receive(destMsg);
     msgBuffers[destNode] = new HTramMessage();
   }
+#ifdef NODE_SRC_BUFFER
+  CmiUnlock(srcNodeGrp->locks[destNode]);
+#endif
 }
 
 void HTram::tflush() {
+#ifdef NODE_SRC_BUFFER
+  HTramNodeGrp* srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
+#endif
   for(int i=0;i<CkNumNodes();i++) {
+#ifdef NODE_SRC_BUFFER
+    CmiLock(srcNodeGrp->locks[i]);
+#endif
     nodeGrpProxy[i].receive(msgBuffers[i]); //only upto next
     msgBuffers[i] = new HTramMessage();
+#ifdef NODE_SRC_BUFFER
+    CmiUnlock(srcNodeGrp->locks[i]);
+#endif
   }
 }
+
+HTramNodeGrp::HTramNodeGrp() {
+#ifdef NODE_SRC_BUFFER
+  locks = new CmiNodeLock[CkNumNodes()];
+  for(int i=0;i<CkNumNodes();i++)
+    locks[i] = CmiCreateLock();
+#endif
+  msgBuffers = new HTramMessage*[CkNumNodes()];
+  for(int i=0;i<CkNumNodes();i++)
+    msgBuffers[i] = new HTramMessage();
+}
+
+HTramNodeGrp::HTramNodeGrp(CkMigrateMessage* msg) {}
 
 
 HTramRecv::HTramRecv(){

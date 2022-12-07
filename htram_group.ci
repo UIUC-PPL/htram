@@ -1,6 +1,7 @@
 module htram_group{
   readonly CProxy_HTram tram_proxy;
   readonly CProxy_HTramRecv nodeGrpProxy;
+  readonly CProxy_HTramNodeGrp srcNodeGrpProxy;
   message HTramMessage {
     itemT *buffer;
     int next; 
@@ -17,6 +18,10 @@ module htram_group{
     entry void insertValue(int value, int destPE);
     entry void tflush(); 
     entry void receivePerPE(HTramNodeMessage*);
+  };
+
+  nodegroup HTramNodeGrp {
+    entry HTramNodeGrp();
   };
 
   nodegroup HTramRecv {

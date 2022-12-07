@@ -3,9 +3,10 @@
 #include "htram_group.decl.h"
 /* readonly */ extern CProxy_HTram tram_proxy;
 /* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
+/* readonly */ extern CProxy_HTramNodeGrp srcNodeGrpProxy;
 
 using namespace std;
-#define BUFSIZE 1024
+#define BUFSIZE 4096
 #define PPN_COUNT 32
 
 typedef struct item {
@@ -29,6 +30,15 @@ class HTramNodeMessage : public CMessage_HTramNodeMessage {
     HTramNodeMessage() {}
     int buffer[BUFSIZE];
     int offset[PPN_COUNT];
+};
+
+class HTramNodeGrp : public CBase_HTramNodeGrp {
+  HTramNodeGrp_SDAG_CODE
+  public:
+    HTramMessage **msgBuffers;
+    CmiNodeLock *locks;
+    HTramNodeGrp();
+    HTramNodeGrp(CkMigrateMessage* msg);
 };
 
 typedef void (*callback_function)(void*, int);
