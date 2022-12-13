@@ -125,7 +125,7 @@ tramNonSmp<T>::tramNonSmp()
   , enable_flushing(false)
   , time_to_flush(std::numeric_limits<double>::max()) {
     buffer_t& buffer_size = TRAM_ACCESS_SINGLETON(payload_buffer_size);
-    buffer_size = 1024;
+    buffer_size = 8192;//1024;
 
     // Question: Does this also needs to be double pointer? I think not.
     msgBuffers = new tramNonSmpMsg<value_type>*[CkNumPes()];

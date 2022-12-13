@@ -25,6 +25,7 @@ int l_flush_timer = 500;
 
 using tram_proxy_t = CProxy_HTram;
 using tram_t = HTram;
+using tramR_t = HTramRecv;
 
 /* readonly */ CProxy_HTramRecv nodeGrpProxy;
 #elif TRAM_NON_SMP
@@ -165,7 +166,7 @@ public:
   }
 
   void preGenerateUpdates() {
-    tram_t* tram = tram_proxy.ckLocalBranch();
+    tramR_t* tram = nodeGrpProxy.ckLocalBranch();
     tram->set_func_ptr(Updater::insertDataCaller, this);
 
     contribute(CkCallback(CkReductionTarget(Updater, generateUpdates), thisProxy));

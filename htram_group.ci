@@ -16,11 +16,12 @@ module htram_group{
     entry HTram(CkGroupID gid, CkCallback cb);
     entry void insertValue(int value, int destPE);
     entry void tflush(); 
-    entry void receivePerPE(HTramNodeMessage*);
+//    entry void receivePerPE(HTramNodeMessage*);
   };
 
-  nodegroup HTramRecv {
+  group HTramRecv {
     entry HTramRecv();
     entry void receive(HTramMessage*);
+    entry void receivePerPE(HTramNodeMessage*);
   }
 };

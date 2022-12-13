@@ -19,7 +19,7 @@ module htram{
     entry void receivePerPE(HTramNodeMessage*);
   };
 
-  nodegroup HTramRecv {
+  group HTramRecv {
     entry HTramRecv();
     entry void receive(HTramMessage*);
   }

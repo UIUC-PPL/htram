@@ -6,7 +6,7 @@ libtramnonsmp.a : tramNonSmp.o
 	$(CHARMC) tramNonSmp.o -o libtramnonsmp.a -language charm++
 
 tramNonSmp.o : tramNonSmp.C tramNonSmp.def.h tramNonSmp.decl.h
-	$(CHARMC) -c tramNonSmp.C -o tramNonSmp.o -g
+	$(CHARMC) -c tramNonSmp.C -o tramNonSmp.o
 
 tramNonSmp.def.h tramNonSmp.decl.h : tramNonSmp.ci
 	$(CHARMC) tramNonSmp.ci
@@ -30,10 +30,10 @@ htram_group.def.h htram_group.decl.h: htram_group.ci
 	$(CHARMC_SMP) htram_group.ci
 
 libhtram.a: htram.o
-	$(CHARMC_SMP) $< -o $@ -language charm++
+	$(CHARMC_SMP) -g $< -o $@ -language charm++
 
 htram.o : htram.C htram.def.h htram.decl.h
-	$(CHARMC_SMP) -c htram.C
+	$(CHARMC_SMP) -g -c htram.C
 
 htram.def.h htram.decl.h : htram.ci
 	$(CHARMC_SMP) htram.ci

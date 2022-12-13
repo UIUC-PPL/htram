@@ -53,7 +53,7 @@ void HTram::insertValue(int value, int dest_pe) {
 
 void HTram::tflush() {
   for(int i=0;i<CkNumNodes();i++) {
-    nodeGrpProxy[i].receive(msgBuffers[i]); //only upto next
+    nodeGrpProxy[i*CkNodeSize(0)+CkMyRank()].receive(msgBuffers[i]); //only upto next
     msgBuffers[i] = new HTramMessage();
   }
 }
@@ -71,7 +71,7 @@ void HTramRecv::receive(HTramMessage* agg_message) {
 
   int sizes[PPN_COUNT] = {0};
 
-  int rank0PE = CkNodeFirst(thisIndex);
+  int rank0PE = CkMyNode()*CkNodeSize(0);//CkNodeFirst(thisIndex);
 
   for(int i=0;i<agg_message->next;i++) {
     int rank = agg_message->buffer[i].destPe - rank0PE;
