@@ -1,15 +1,20 @@
 #include "htram_group.h"
 //#define NODE_SRC_BUFFER 1
 //#define DEBUG 1
+
+void periodic_tflush(void *htram_obj, double time);
+
 HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, double time_in_ms) {
   // TODO: Implement variable buffer sizes and timed buffer flushing
-
+  flush_time = time_in_ms;
   client_gid = cgid;
 //  cb = delivercb;
   myPE = CkMyPe();
   msgBuffers = new HTramMessage*[CkNumNodes()];
   for(int i=0;i<CkNumNodes();i++)
     msgBuffers[i] = new HTramMessage();
+  if(enable_buffer_flushing)
+    periodic_tflush((void *) this, flush_time);
 }
 
 HTram::HTram(CkGroupID cgid, CkCallback ecb){
@@ -65,6 +70,10 @@ void HTram::insertValue(int value, int dest_pe) {
     msgBuffers[destNode] = new HTramMessage();
   }
 #endif
+}
+
+void HTram::registercb() {
+  CcdCallFnAfter(periodic_tflush, (void *) this, flush_time);
 }
 
 void HTram::tflush() {
@@ -163,5 +172,11 @@ void HTram::receivePerPE(HTramNodeMessage* msg) {
   CkFreeMsg(msg);
 }
 
+void periodic_tflush(void *htram_obj, double time) {
+//  CkPrintf("\nIn callback_fn on PE#%d at time %lf",CkMyPe(), CkWallTimer());
+  HTram *proper_obj = (HTram *)htram_obj;
+  proper_obj->tflush();
+  proper_obj->registercb();
+}
 #include "htram_group.def.h"
 

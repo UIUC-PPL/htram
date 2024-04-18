@@ -52,6 +52,7 @@ class HTram : public CBase_HTram {
     CkGroupID client_gid;
     CkCallback endCb;
     int myPE;
+    double flush_time;
     void* objPtr;
     HTramMessage **msgBuffers;
   public:
@@ -63,6 +64,7 @@ class HTram : public CBase_HTram {
     void insertValue(int send_value, int dest_pe);
     void tflush();
     void receivePerPE(HTramNodeMessage *);
+    void registercb();
 };
 
 
