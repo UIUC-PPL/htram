@@ -16,8 +16,9 @@ module htram_group{
     entry HTram(CkGroupID, int, bool, double);
     entry HTram(CkGroupID gid, CkCallback cb);
     entry void insertValue(int value, int destPE);
-    entry void tflush(); 
+    entry void tflush();
     entry void receivePerPE(HTramNodeMessage*);
+    entry void stop_periodic_flush();
   };
 
   nodegroup HTramNodeGrp {

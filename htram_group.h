@@ -56,6 +56,7 @@ class HTram : public CBase_HTram {
     void* objPtr;
     HTramMessage **msgBuffers;
   public:
+    bool enable_flush;
     HTram(CkGroupID gid, int buffer_size, bool enable_timed_flushing, double flush_timer);
     HTram(CkGroupID gid, CkCallback cb);
     HTram(CkMigrateMessage* msg);
@@ -65,6 +66,7 @@ class HTram : public CBase_HTram {
     void tflush();
     void receivePerPE(HTramNodeMessage *);
     void registercb();
+    void stop_periodic_flush();
 };
 
 
