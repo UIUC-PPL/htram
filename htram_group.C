@@ -91,8 +91,11 @@ void HTram::tflush() {
       CmiUnlock(srcNodeGrp->locks[i]);
     }
 #endif
-    nodeGrpProxy[i].receive(msgBuffers[i]); //only upto next
-    msgBuffers[i] = new HTramMessage();
+    if(msgBuffers[i]->next)
+    {
+      nodeGrpProxy[i].receive(msgBuffers[i]); //only upto next
+      msgBuffers[i] = new HTramMessage();
+    }
   }
 }
 
