@@ -1,5 +1,5 @@
 #CHARMC =../../../bin/charmc $(OPTS)
-#CHARMC_SMP =../../../bin/charmc $(OPTS)
+CHARMC_SMP =../../../mpi-linux-x86_64-smp/bin/charmc $(OPTS)
 
 CHARMCFLAGS = $(OPTS) -O3
 
