@@ -12,8 +12,19 @@ HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, doubl
 //  cb = delivercb;
   myPE = CkMyPe();
   msgBuffers = new HTramMessage*[CkNumNodes()];
+#ifdef SRC_GROUPING
+  if(thisIndex==0) CkPrintf("\nSource-side grouping enabled\n");
+#endif
+
   for(int i=0;i<CkNumNodes();i++)
     msgBuffers[i] = new HTramMessage();
+
+#ifdef SRC_GROUPING
+  localBuffers = new HTramMessage*[CkNumPes()];
+  for(int i=0;i<CkNumPes();i++)
+    localBuffers[i] = new HTramMessage();
+#endif
+
   if(enable_flush)
     periodic_tflush((void *) this, flush_time);
 }
@@ -45,9 +56,17 @@ void HTram::insertValue(int value, int dest_pe) {
 #ifdef NODE_SRC_BUFFER
   HTramNodeGrp* srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
 #endif
+
   HTramMessage *destMsg = msgBuffers[destNode];
+#ifdef SRC_GROUPING
+  HTramMessage *localMsg = localBuffers[dest_pe];
+  localMsg->buffer[localMsg->next].payload = value;
+  localMsg->buffer[localMsg->next].destPe = dest_pe;
+  localMsg->next++;
+#else
   destMsg->buffer[destMsg->next].payload = value;
   destMsg->buffer[destMsg->next].destPe = dest_pe;
+#endif
   destMsg->next++;
 
 #ifdef NODE_SRC_BUFFER
@@ -67,6 +86,16 @@ void HTram::insertValue(int value, int dest_pe) {
   }
 #else
   if(destMsg->next == BUFSIZE) {
+#ifdef SRC_GROUPING
+    int sz = 0;
+    for(int i=0;i<CkNodeSize(0);i++) {
+      HTramMessage *localMsg = localBuffers[destNode*CkNodeSize(0)+i];
+      for(int j=0;j<localMsg->next;j++)
+        destMsg->buffer[sz++] = localMsg->buffer[j];
+      destMsg->index[i] = sz;
+      localMsg->next = 0;
+    }
+#endif
     nodeGrpProxy[destNode].receive(destMsg);
     msgBuffers[destNode] = new HTramMessage();
   }
@@ -93,6 +122,18 @@ void HTram::tflush() {
 #endif
     if(msgBuffers[i]->next)
     {
+#ifdef SRC_GROUPING
+      int destNode = i;
+      HTramMessage *destMsg = msgBuffers[i];
+      int sz = 0;
+      for(int k=0;k<CkNodeSize(0);k++) {
+        HTramMessage *localMsg = localBuffers[destNode*CkNodeSize(0)+k];
+        for(int j=0;j<localMsg->next;j++)
+          destMsg->buffer[sz++] = localMsg->buffer[j];
+        destMsg->index[k] = sz;
+        localMsg->next = 0;
+      }
+#endif
       nodeGrpProxy[i].receive(msgBuffers[i]); //only upto next
       msgBuffers[i] = new HTramMessage();
     }
@@ -131,6 +172,27 @@ bool upper(itemT a, double value) {
 
 HTramRecv::HTramRecv(CkMigrateMessage* msg) {}
 
+#ifdef SRC_GROUPING
+  void HTramRecv::receive(HTramMessage* agg_message) {
+    for(int i=CkNodeFirst(CkMyNode()); i < CkNodeFirst(CkMyNode())+CkNodeSize(0);i++) {
+      HTramMessage* tmpMsg = (HTramMessage*)CkReferenceMsg(agg_message);
+      _SET_USED(UsrToEnv(tmpMsg), 0);
+      tram_proxy[i].receivePerPE(tmpMsg);
+    } 
+  }
+
+  void HTram::receivePerPE(HTramMessage* msg) {
+    int llimit = 0;
+    int rank = CkMyRank();
+    if(rank > 0) llimit = msg->index[rank-1];
+    int ulimit = msg->index[rank];
+    for(int i=llimit; i<ulimit;i++){
+      cb(objPtr, msg->buffer[i].payload);
+    }
+    CkFreeMsg(msg);
+  }
+
+#else
 void HTramRecv::receive(HTramMessage* agg_message) {
   //broadcast to each PE and decr refcount
   //nodegroup //reference from group
@@ -175,7 +237,7 @@ void HTram::receivePerPE(HTramNodeMessage* msg) {
   }
   CkFreeMsg(msg);
 }
-
+#endif
 void HTram::stop_periodic_flush() {
   enable_flush = false;
 }
@@ -187,5 +249,6 @@ void periodic_tflush(void *htram_obj, double time) {
   if(proper_obj->enable_flush)
     proper_obj->registercb();
 }
+
 #include "htram_group.def.h"
 

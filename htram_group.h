@@ -1,5 +1,6 @@
 #ifndef __HTRAM_H__
 #define __HTRAM_H__
+//#define SRC_GROUPING
 #include "htram_group.decl.h"
 /* readonly */ extern CProxy_HTram tram_proxy;
 /* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
@@ -22,6 +23,9 @@ class HTramMessage : public CMessage_HTramMessage {
       std::copy(buf, buf+size, buffer);
     }
     itemT buffer[BUFSIZE];
+#ifdef SRC_GROUPING
+    int index[PPN_COUNT] = {-1};
+#endif
     int next; //next available slot in buffer
 };
 
@@ -55,6 +59,7 @@ class HTram : public CBase_HTram {
     double flush_time;
     void* objPtr;
     HTramMessage **msgBuffers;
+    HTramMessage **localBuffers;
   public:
     bool enable_flush;
     HTram(CkGroupID gid, int buffer_size, bool enable_timed_flushing, double flush_timer);
@@ -64,7 +69,11 @@ class HTram : public CBase_HTram {
     int getAggregatingPE(int dest_pe);
     void insertValue(int send_value, int dest_pe);
     void tflush();
+#ifdef SRC_GROUPING
+    void receivePerPE(HTramMessage *);
+#else
     void receivePerPE(HTramNodeMessage *);
+#endif
     void registercb();
     void stop_periodic_flush();
 };
