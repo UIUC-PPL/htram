@@ -12,7 +12,9 @@ using namespace std;
 #define PPN_COUNT 64
 
 typedef struct item {
+#ifndef SRC_GROUPING
   int destPe;
+#endif
   int payload;
 } itemT; //make customized size
 
@@ -59,7 +61,7 @@ class HTram : public CBase_HTram {
     double flush_time;
     void* objPtr;
     HTramMessage **msgBuffers;
-    HTramMessage **localBuffers;
+    std::vector<itemT>* localBuffers;
   public:
     bool enable_flush;
     HTram(CkGroupID gid, int buffer_size, bool enable_timed_flushing, double flush_timer);

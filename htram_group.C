@@ -20,9 +20,7 @@ HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, doubl
     msgBuffers[i] = new HTramMessage();
 
 #ifdef SRC_GROUPING
-  localBuffers = new HTramMessage*[CkNumPes()];
-  for(int i=0;i<CkNumPes();i++)
-    localBuffers[i] = new HTramMessage();
+  localBuffers = new std::vector<itemT>[CkNumPes()];
 #endif
 
   if(enable_flush)
@@ -59,10 +57,8 @@ void HTram::insertValue(int value, int dest_pe) {
 
   HTramMessage *destMsg = msgBuffers[destNode];
 #ifdef SRC_GROUPING
-  HTramMessage *localMsg = localBuffers[dest_pe];
-  localMsg->buffer[localMsg->next].payload = value;
-  localMsg->buffer[localMsg->next].destPe = dest_pe;
-  localMsg->next++;
+  itemT itm = {value};
+  localBuffers[dest_pe].push_back(itm);
 #else
   destMsg->buffer[destMsg->next].payload = value;
   destMsg->buffer[destMsg->next].destPe = dest_pe;
@@ -89,11 +85,11 @@ void HTram::insertValue(int value, int dest_pe) {
 #ifdef SRC_GROUPING
     int sz = 0;
     for(int i=0;i<CkNodeSize(0);i++) {
-      HTramMessage *localMsg = localBuffers[destNode*CkNodeSize(0)+i];
-      for(int j=0;j<localMsg->next;j++)
-        destMsg->buffer[sz++] = localMsg->buffer[j];
+      std::vector<itemT> localMsg = localBuffers[destNode*CkNodeSize(0)+i];
+      std::copy(localMsg.begin(), localMsg.end(), &(destMsg->buffer[sz]));
+      sz += localMsg.size();
       destMsg->index[i] = sz;
-      localMsg->next = 0;
+      localBuffers[destNode*CkNodeSize(0)+i].clear();
     }
 #endif
     nodeGrpProxy[destNode].receive(destMsg);
@@ -127,11 +123,11 @@ void HTram::tflush() {
       HTramMessage *destMsg = msgBuffers[i];
       int sz = 0;
       for(int k=0;k<CkNodeSize(0);k++) {
-        HTramMessage *localMsg = localBuffers[destNode*CkNodeSize(0)+k];
-        for(int j=0;j<localMsg->next;j++)
-          destMsg->buffer[sz++] = localMsg->buffer[j];
+        std::vector<itemT> localMsg = localBuffers[destNode*CkNodeSize(0)+k];
+        std::copy(localMsg.begin(), localMsg.end(), &(destMsg->buffer[sz]));
+        sz += localMsg.size();
         destMsg->index[k] = sz;
-        localMsg->next = 0;
+        localBuffers[destNode*CkNodeSize(0)+k].clear();
       }
 #endif
       nodeGrpProxy[i].receive(msgBuffers[i]); //only upto next

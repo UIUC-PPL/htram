@@ -31,6 +31,6 @@ module htram_group{
 
   nodegroup HTramRecv {
     entry HTramRecv();
-    entry void receive(HTramMessage*);
+    entry [expedited] void receive(HTramMessage*);
   }
 };
