@@ -221,6 +221,7 @@ void HTramRecv::receive(HTramMessage* agg_message) {
     _SET_USED(UsrToEnv(tmpMsg), 0);
     tram_proxy[i].receivePerPE(tmpMsg);
   }
+  CkFreeMsg(sorted_agg_message);
 }
 
 void HTram::receivePerPE(HTramNodeMessage* msg) {
