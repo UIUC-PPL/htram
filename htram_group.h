@@ -1,6 +1,7 @@
 #ifndef __HTRAM_H__
 #define __HTRAM_H__
 //#define SRC_GROUPING
+//#define PER_DESTPE_BUFFER
 #include "htram_group.decl.h"
 /* readonly */ extern CProxy_HTram tram_proxy;
 /* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
@@ -12,7 +13,7 @@ using namespace std;
 #define PPN_COUNT 64
 
 typedef struct item {
-#ifndef SRC_GROUPING
+#if !defined(SRC_GROUPING) && !defined(PER_DESTPE_BUFFER)
   int destPe;
 #endif
   int payload;
@@ -73,6 +74,8 @@ class HTram : public CBase_HTram {
     void tflush();
 #ifdef SRC_GROUPING
     void receivePerPE(HTramMessage *);
+#elif defined PER_DESTPE_BUFFER
+    void receiveOnPE(HTramMessage* msg);
 #else
     void receivePerPE(HTramNodeMessage *);
 #endif
@@ -87,6 +90,8 @@ class HTramRecv : public CBase_HTramRecv {
   public:
     HTramRecv();
     HTramRecv(CkMigrateMessage* msg);
+#ifndef PER_DESTPE_BUFFER
     void receive(HTramMessage*);
+#endif
 };
 #endif

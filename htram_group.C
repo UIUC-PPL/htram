@@ -11,12 +11,21 @@ HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, doubl
   enable_flush = enable_buffer_flushing;
 //  cb = delivercb;
   myPE = CkMyPe();
+#ifdef PER_DESTPE_BUFFER
+  msgBuffers = new HTramMessage*[CkNumPes()];
+#else
   msgBuffers = new HTramMessage*[CkNumNodes()];
+#endif
+
 #ifdef SRC_GROUPING
   if(thisIndex==0) CkPrintf("\nSource-side grouping enabled\n");
 #endif
 
+#ifdef PER_DESTPE_BUFFER
+  for(int i=0;i<CkNumPes();i++)
+#else
   for(int i=0;i<CkNumNodes();i++)
+#endif
     msgBuffers[i] = new HTramMessage();
 
 #ifdef SRC_GROUPING
@@ -55,10 +64,17 @@ void HTram::insertValue(int value, int dest_pe) {
   HTramNodeGrp* srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
 #endif
 
+#ifdef PER_DESTPE_BUFFER
+  HTramMessage *destMsg = msgBuffers[dest_pe];
+#else
   HTramMessage *destMsg = msgBuffers[destNode];
+#endif
+
 #ifdef SRC_GROUPING
   itemT itm = {value};
   localBuffers[dest_pe].push_back(itm);
+#elif defined PER_DESTPE_BUFFER
+  destMsg->buffer[destMsg->next].payload = value;
 #else
   destMsg->buffer[destMsg->next].payload = value;
   destMsg->buffer[destMsg->next].destPe = dest_pe;
@@ -92,8 +108,13 @@ void HTram::insertValue(int value, int dest_pe) {
       localBuffers[destNode*CkNodeSize(0)+i].clear();
     }
 #endif
+#ifdef PER_DESTPE_BUFFER
+    thisProxy[dest_pe].receiveOnPE(destMsg);
+    msgBuffers[dest_pe] = new HTramMessage();
+#else
     nodeGrpProxy[destNode].receive(destMsg);
     msgBuffers[destNode] = new HTramMessage();
+#endif
   }
 #endif
 }
@@ -106,7 +127,11 @@ void HTram::tflush() {
 #ifdef NODE_SRC_BUFFER
   HTramNodeGrp* srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
 #endif
+#ifdef PER_DESTPE_BUFFER
+  for(int i=0;i<CkNumPes();i++) {
+#else
   for(int i=0;i<CkNumNodes();i++) {
+#endif
 #ifdef NODE_SRC_BUFFER
     //if(CkMyRank()==0)
     {
@@ -130,7 +155,11 @@ void HTram::tflush() {
         localBuffers[destNode*CkNodeSize(0)+k].clear();
       }
 #endif
+#ifndef PER_DESTPE_BUFFER
       nodeGrpProxy[i].receive(msgBuffers[i]); //only upto next
+#else
+      thisProxy[i].receiveOnPE(msgBuffers[i]);
+#endif
       msgBuffers[i] = new HTramMessage();
     }
   }
@@ -188,6 +217,12 @@ HTramRecv::HTramRecv(CkMigrateMessage* msg) {}
     CkFreeMsg(msg);
   }
 
+#elif defined PER_DESTPE_BUFFER
+  void HTram::receiveOnPE(HTramMessage* msg) {
+    for(int i=0;i<msg->next;i++)
+      cb(objPtr, msg->buffer[i].payload);
+    delete msg;
+  }
 #else
 void HTramRecv::receive(HTramMessage* agg_message) {
   //broadcast to each PE and decr refcount
@@ -235,6 +270,7 @@ void HTram::receivePerPE(HTramNodeMessage* msg) {
   CkFreeMsg(msg);
 }
 #endif
+
 void HTram::stop_periodic_flush() {
   enable_flush = false;
 }

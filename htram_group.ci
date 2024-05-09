@@ -12,6 +12,7 @@ module htram_group{
     int *offset;
   };
 //#define SRC_GROUPING
+//#define PER_DESTPE_BUFFER
   group HTram {
     entry HTram(CkGroupID, int, bool, double);
     entry HTram(CkGroupID gid, CkCallback cb);
@@ -19,6 +20,8 @@ module htram_group{
     entry void tflush();
 #ifdef SRC_GROUPING
     entry void receivePerPE(HTramMessage*);
+#elif defined PER_DESTPE_BUFFER
+    entry void receiveOnPE(HTramMessage* msg);
 #else
     entry void receivePerPE(HTramNodeMessage*);
 #endif
@@ -31,6 +34,8 @@ module htram_group{
 
   nodegroup HTramRecv {
     entry HTramRecv();
+#ifndef PER_DESTPE_BUFFER
     entry [expedited] void receive(HTramMessage*);
+#endif
   }
 };
