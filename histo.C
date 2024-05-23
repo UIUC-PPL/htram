@@ -76,7 +76,7 @@ public:
     // Initialize TRAM with appropriate arguments
     CkGroupID updater_array_gid;
     updater_array_gid = updater_array.ckGetGroupID();
-    tram_proxy = tram_proxy_t::ckNew(updater_array_gid, l_buffer_size, enable_buffer_flushing, static_cast<double>(l_flush_timer)/1000);
+    tram_proxy = tram_proxy_t::ckNew(updater_array_gid, l_buffer_size, enable_buffer_flushing, static_cast<double>(l_flush_timer)/1000, false);
 
 #ifdef TRAM_SMP
     nodeGrpProxy = CProxy_HTramRecv::ckNew();
@@ -166,9 +166,16 @@ public:
     ((Updater *)p)->insertData(key);
   }
 
+  static void insertDataArrCaller(void* p, int* keys, int count) {
+    for(int i=0;i<count;i++) {
+      ((Updater *)p)->insertData(keys[i]);
+    }
+  }
+
   void preGenerateUpdates() {
     tram_t* tram = tram_proxy.ckLocalBranch();
-    tram->set_func_ptr(Updater::insertDataCaller, this);
+//    tram->set_func_ptr(Updater::insertDataCaller, this);
+    tram->set_func_ptr_retarr(Updater::insertDataArrCaller, this);
 
     contribute(CkCallback(CkReductionTarget(Updater, generateUpdates), thisProxy));
   }

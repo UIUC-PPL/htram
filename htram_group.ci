@@ -14,7 +14,7 @@ module htram_group{
 //#define SRC_GROUPING
 //#define PER_DESTPE_BUFFER
   group HTram {
-    entry HTram(CkGroupID, int, bool, double);
+    entry HTram(CkGroupID, int, bool, double, bool);
     entry HTram(CkGroupID gid, CkCallback cb);
     entry void insertValue(int value, int destPE);
     entry void tflush();

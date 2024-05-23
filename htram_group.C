@@ -4,11 +4,12 @@
 
 void periodic_tflush(void *htram_obj, double time);
 
-HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, double time_in_ms) {
+HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, double time_in_ms, bool ret_item) {
   // TODO: Implement variable buffer sizes and timed buffer flushing
   flush_time = time_in_ms;
   client_gid = cgid;
   enable_flush = enable_buffer_flushing;
+  ret_list = !ret_item;
 //  cb = delivercb;
   myPE = CkMyPe();
 #ifdef PER_DESTPE_BUFFER
@@ -50,6 +51,11 @@ HTram::HTram(CkGroupID cgid, CkCallback ecb){
 
 void HTram::set_func_ptr(void (*func)(void*, int), void* obPtr) {
   cb = func;
+  objPtr = obPtr;
+}
+
+void HTram::set_func_ptr_retarr(void (*func)(void*, int*, int), void* obPtr) {
+  cb_retarr = func;
   objPtr = obPtr;
 }
 
@@ -264,9 +270,11 @@ void HTram::receivePerPE(HTramNodeMessage* msg) {
   int rank = CkMyRank();
   if(rank > 0) llimit = msg->offset[rank-1];
   int ulimit = msg->offset[rank];
-  for(int i=llimit; i<ulimit;i++){
-    cb(objPtr, msg->buffer[i]);
-  }
+  if(!ret_list) {
+    for(int i=llimit; i<ulimit;i++)
+      cb(objPtr, msg->buffer[i]);
+  } else
+    cb_retarr(objPtr, &msg->buffer[llimit], ulimit-llimit);
   CkFreeMsg(msg);
 }
 #endif

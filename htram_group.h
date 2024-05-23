@@ -50,25 +50,29 @@ class HTramNodeGrp : public CBase_HTramNodeGrp {
 };
 
 typedef void (*callback_function)(void*, int);
+typedef void (*callback_function_retarr)(void*, int*, int);
 
 class HTram : public CBase_HTram {
   HTram_SDAG_CODE
 
   private:
     callback_function cb;
+    callback_function_retarr cb_retarr;
     CkGroupID client_gid;
     CkCallback endCb;
     int myPE;
+    bool ret_list;
     double flush_time;
     void* objPtr;
     HTramMessage **msgBuffers;
     std::vector<itemT>* localBuffers;
   public:
     bool enable_flush;
-    HTram(CkGroupID gid, int buffer_size, bool enable_timed_flushing, double flush_timer);
+    HTram(CkGroupID gid, int buffer_size, bool enable_timed_flushing, double flush_timer, bool ret_item);
     HTram(CkGroupID gid, CkCallback cb);
     HTram(CkMigrateMessage* msg);
     void set_func_ptr(void (*func)(void*, int), void*);
+    void set_func_ptr_retarr(void (*func)(void*, int*, int), void*);
     int getAggregatingPE(int dest_pe);
     void insertValue(int send_value, int dest_pe);
     void tflush();
