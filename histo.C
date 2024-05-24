@@ -13,6 +13,7 @@ int lnum_counts = 1000;       // per thread size of the table
 int l_buffer_size = 1024;
 bool enable_buffer_flushing = false;
 int l_flush_timer = 500;
+bool return_item = true;
 
 #ifdef TRAM_SMP
 #if GROUPBY
@@ -76,7 +77,7 @@ public:
     // Initialize TRAM with appropriate arguments
     CkGroupID updater_array_gid;
     updater_array_gid = updater_array.ckGetGroupID();
-    tram_proxy = tram_proxy_t::ckNew(updater_array_gid, l_buffer_size, enable_buffer_flushing, static_cast<double>(l_flush_timer)/1000, false);
+    tram_proxy = tram_proxy_t::ckNew(updater_array_gid, l_buffer_size, enable_buffer_flushing, static_cast<double>(l_flush_timer)/1000, return_item);
 
 #ifdef TRAM_SMP
     nodeGrpProxy = CProxy_HTramRecv::ckNew();
@@ -174,8 +175,10 @@ public:
 
   void preGenerateUpdates() {
     tram_t* tram = tram_proxy.ckLocalBranch();
-//    tram->set_func_ptr(Updater::insertDataCaller, this);
+    tram->set_func_ptr(Updater::insertDataCaller, this);
+#ifdef RETURN_ITEMLIST
     tram->set_func_ptr_retarr(Updater::insertDataArrCaller, this);
+#endif
 
     contribute(CkCallback(CkReductionTarget(Updater, generateUpdates), thisProxy));
   }

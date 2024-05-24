@@ -97,7 +97,7 @@ public:
 
     tramNonSmp(int, double);
 
-    tramNonSmp(CkGroupID, int, bool, double);
+    tramNonSmp(CkGroupID, int, bool, double, bool);
 
     // Locally accessed function
     void set_func_ptr(function_ptr fptr, void* optr);
@@ -175,7 +175,7 @@ tramNonSmp<T>::tramNonSmp(int buffer_size_, double time_in_ms)
 }
 
 template <typename T>
-tramNonSmp<T>::tramNonSmp(CkGroupID gid, int buffer_size_, bool enable_buffer_flushing, double time_in_ms) 
+tramNonSmp<T>::tramNonSmp(CkGroupID gid, int buffer_size_, bool enable_buffer_flushing, double time_in_ms, bool ret_item)
   : func_ptr(nullptr)
   , obj_ptr(nullptr)
   , is_itemized(true)
