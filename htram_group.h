@@ -2,6 +2,7 @@
 #define __HTRAM_H__
 //#define SRC_GROUPING
 //#define PER_DESTPE_BUFFER
+//#define NODE_SRC_BUFFER
 #include "htram_group.decl.h"
 /* readonly */ extern CProxy_HTram tram_proxy;
 /* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
@@ -43,8 +44,10 @@ class HTramNodeMessage : public CMessage_HTramNodeMessage {
 class HTramNodeGrp : public CBase_HTramNodeGrp {
   HTramNodeGrp_SDAG_CODE
   public:
+    std::atomic_int flush_count{0};
+    std::atomic_int get_idx[PPN_COUNT];
+    std::atomic_int done_count[PPN_COUNT];
     HTramMessage **msgBuffers;
-    CmiNodeLock *locks;
     HTramNodeGrp();
     HTramNodeGrp(CkMigrateMessage* msg);
 };
