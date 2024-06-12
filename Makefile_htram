@@ -6,7 +6,7 @@ libtramnonsmp.a : tramNonSmp.o
 	$(CHARMC) tramNonSmp.o -o libtramnonsmp.a -language charm++
 
 tramNonSmp.o : tramNonSmp.C tramNonSmp.def.h tramNonSmp.decl.h
-	$(CHARMC) -c tramNonSmp.C -o tramNonSmp.o -g
+	$(CHARMC) -c tramNonSmp.C -o tramNonSmp.o
 
 tramNonSmp.def.h tramNonSmp.decl.h : tramNonSmp.ci
 	$(CHARMC) tramNonSmp.ci

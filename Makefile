@@ -12,7 +12,7 @@ include Makefile_htram
 
 histo_smp: histo.C histo.ci histo.decl.h histo.def.h libhtram_group.a
 	$(CHARMC_SMP) histo.ci -DTRAM_SMP -DGROUPBY
-	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY 
+	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY
 
 histo_nonSmp: histo.C histo.ci histo.decl.h histo.def.h libtramnonsmp.a
 	$(CHARMC) histo.ci -DTRAM_NON_SMP

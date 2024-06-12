@@ -8,15 +8,18 @@ HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, doubl
   flush_time = time_in_ms;
   client_gid = cgid;
   enable_flush = enable_buffer_flushing;
+  total_overhead = atomics_overhead = while_waittime = fetchadd_time = mem_access_ov = 0.0;
   ret_list = !ret_item;
 //  cb = delivercb;
   myPE = CkMyPe();
 #ifdef PER_DESTPE_BUFFER
   msgBuffers = new HTramMessage*[CkNumPes()];
 #else
+#ifndef NODE_SRC_BUFFER
   msgBuffers = new HTramMessage*[CkNumNodes()];
 #endif
-
+#endif
+  localMsgBuffer = new HTramMessage();
 #ifdef SRC_GROUPING
   if(thisIndex==0) CkPrintf("\nSource-side grouping enabled\n");
 #endif
@@ -24,14 +27,25 @@ HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, doubl
 #ifdef PER_DESTPE_BUFFER
   for(int i=0;i<CkNumPes();i++)
 #else
+#ifndef NODE_SRC_BUFFER
   for(int i=0;i<CkNumNodes();i++)
 #endif
+#endif
+#ifndef NODE_SRC_BUFFER
     msgBuffers[i] = new HTramMessage();
+#endif
 
 #ifdef SRC_GROUPING
   localBuffers = new std::vector<itemT>[CkNumPes()];
 #endif
-
+#ifdef LOCAL_BUF
+  local_buf = new HTramLocalMessage*[CkNumNodes()];
+  for(int i=0;i<CkNumNodes();i++)
+  {
+    local_buf[i] = new HTramLocalMessage();
+    local_idx[i] = 0;
+  }
+#endif
   if(enable_flush)
     periodic_tflush((void *) this, flush_time);
 }
@@ -41,6 +55,8 @@ HTram::HTram(CkGroupID cgid, CkCallback ecb){
 //  cb = delivercb;
   endCb = ecb;
   myPE = CkMyPe();
+  total_overhead = atomics_overhead = while_waittime = fetchadd_time = mem_access_ov = 0.0;
+  localMsgBuffer = new HTramMessage();
 #ifndef NODE_SRC_BUFFER
   msgBuffers = new HTramMessage*[CkNumNodes()];
   for(int i=0;i<CkNumNodes();i++)
@@ -65,22 +81,90 @@ HTram::HTram(CkMigrateMessage* msg) {}
 void HTram::insertValue(int value, int dest_pe) {
   int destNode = dest_pe/CkNodeSize(0); //find safer way to find dest node,
   // node size is not always same
+  double start_time, at_start_time;
+#ifndef NODE_SRC_BUFFER
+  start_time = CkWallTimer();
+#endif
 #ifdef NODE_SRC_BUFFER
   HTramNodeGrp* srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
-  int idx = srcNodeGrp->get_idx[destNode].fetch_add(1, std::memory_order_seq_cst);
-
-  while( idx+1 > BUFSIZE) {
-//    CkPrintf("\n[PE-%d]Non-usable idx = %d", thisIndex, idx);
-    idx = srcNodeGrp->get_idx[destNode].fetch_add(1, std::memory_order_seq_cst);
+  int increment = 1;
+  int idx = -1;
+#ifdef LOCAL_BUF
+  /*if(CkMyPe()==0)*/ at_start_time = CkWallTimer();
+  bool local_buf_full = false;
+#ifdef DO_TIMER
+  double mw_start_time;
+  /*if(CkMyPe()==0)*/ mw_start_time = CkWallTimer();
+#endif
+  int idx_dnode = local_idx[destNode];
+  if(idx_dnode<=LOCAL_BUFSIZE-1) {
+    local_buf[destNode]->buffer[idx_dnode].payload = value;
+    local_buf[destNode]->buffer[idx_dnode].destPe = dest_pe;
+    local_idx[destNode]++;
   }
+#ifdef DO_TIMER
+  /*if(CkMyPe()==0)*/ mem_access_ov += (CkWallTimer()-mw_start_time);
+#endif
+  if(idx_dnode == LOCAL_BUFSIZE)
+    local_buf_full = true;
+  increment = LOCAL_BUFSIZE;
+  if(local_buf_full)
+#endif
+  {
+#ifdef DO_TIMER
+    double inc_start_time;
+    /*if(CkMyPe()==0)*/ inc_start_time = CkWallTimer();
+#endif
+    idx = srcNodeGrp->get_idx[destNode].fetch_add(increment, std::memory_order_release);
+#ifdef DO_TIMER
+    /*if(CkMyPe()==0)*/ fetchadd_time += (CkWallTimer()-inc_start_time);
+#endif
+  }
+#ifdef LOCAL_BUF
+#ifdef DO_TIMER
+  double loop_start_time;
+  /*if(CkMyPe()==0)*/ loop_start_time = CkWallTimer();
+#endif
+  if(local_buf_full) {
+    while(idx+LOCAL_BUFSIZE > BUFSIZE) {
+#else
+    while(idx+1 > BUFSIZE) {
+#endif
+//    CkPrintf("\n[PE-%d]Non-usable idx = %d", thisIndex, idx);
+      idx = srcNodeGrp->get_idx[destNode].fetch_add(increment, std::memory_order_release);
+    }
+  }
+#ifdef DO_TIMER
+  /*if(CkMyPe()==0)*/ while_waittime += (CkWallTimer()-loop_start_time);
+#endif
+  /*if(CkMyPe()==0)*/ atomics_overhead += (CkWallTimer()-at_start_time);
+
   HTramMessage *nodeBuffer = srcNodeGrp->msgBuffers[destNode];
 //  CkPrintf("\n[PE-%d] idx = %d", thisIndex, idx);
   int done_idx = -1;
+#ifdef LOCAL_BUF
+  if(local_buf_full) {
+    if(idx+LOCAL_BUFSIZE <= BUFSIZE) {
+      /*if(CkMyPe()==0)*/ start_time = CkWallTimer();
+      local_idx[destNode] = 0;
+  //    CkPrintf("\nTrying to use index %d+%d to %d+%d", idx, 0, idx,LOCAL_BUFSIZE-1);
+      for(int i=0;i<LOCAL_BUFSIZE;i++) {
+        nodeBuffer->buffer[idx+i].payload = local_buf[destNode]->buffer[i].payload;
+        nodeBuffer->buffer[idx+i].destPe = local_buf[destNode]->buffer[i].destPe;
+      }
+      done_idx = srcNodeGrp->done_count[destNode].fetch_add(increment, std::memory_order_release);
+      done_idx += increment;
+      /*if(CkMyPe()==0)*/ total_overhead += (CkWallTimer()-start_time);
+      //CkPrintf("\ndone_idx=%d < BUFSIZE %d", done_idx, BUFSIZE);
+    }
+  }
+#else
   if(idx < BUFSIZE) {
     nodeBuffer->buffer[idx].payload = value;
     nodeBuffer->buffer[idx].destPe = dest_pe;
-    done_idx = srcNodeGrp->done_count[destNode].fetch_add(1, std::memory_order_seq_cst);
+    done_idx = srcNodeGrp->done_count[destNode].fetch_add(1, std::memory_order_release);
   }
+#endif
 #else
 
 #ifdef PER_DESTPE_BUFFER
@@ -99,20 +183,30 @@ void HTram::insertValue(int value, int dest_pe) {
   destMsg->buffer[destMsg->next].destPe = dest_pe;
 #endif
   destMsg->next++;
+#ifndef NODE_SRC_BUFFER
+  total_overhead += (CkWallTimer()-start_time);
+#endif
 #endif
 
 #ifdef NODE_SRC_BUFFER
+#ifdef LOCAL_BUF
+  if(local_buf_full)
+  if(done_idx == BUFSIZE) {
+    nodeBuffer->next = done_idx;
+#else
   if(done_idx+1 == BUFSIZE) {
     nodeBuffer->next = done_idx+1;
+#endif
 /*
     CkPrintf("\n[PE-%d]Sending out data with size = %d", thisIndex, nodeBuffer->next);
     for(int i=0;i<nodeBuffer->next;i++)
     CkPrintf("\nvalue=%d, pe=%d", nodeBuffer->buffer[i].payload, nodeBuffer->buffer[i].destPe);
 */
-    nodeGrpProxy[destNode].receive(nodeBuffer);
-    srcNodeGrp->msgBuffers[destNode] = new HTramMessage();
+    srcNodeGrp->msgBuffers[destNode] = new HTramMessage();//localMsgBuffer;
     srcNodeGrp->done_count[destNode] = 0;
     srcNodeGrp->get_idx[destNode] = 0;
+    nodeGrpProxy[destNode].receive(nodeBuffer);
+//    localMsgBuffer = new HTramMessage();
   }
 #else
   if(destMsg->next == BUFSIZE) {
@@ -145,8 +239,10 @@ void HTram::tflush() {
 #ifdef NODE_SRC_BUFFER
   HTramNodeGrp* srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
 #endif
+    /*if(CkMyPe()==0)*/ CkPrintf("\nCopying from local buffer overhead on PE-%d = %lfs, atomics overhead = %lfs, while_waittime = %lfs,fetchadd_time=%lfs,mem_access_ov=%lfs\n", CkMyPe(), total_overhead, atomics_overhead, while_waittime,fetchadd_time,mem_access_ov);
 #ifdef NODE_SRC_BUFFER
     srcNodeGrp->flush_count++;
+#if 0
     if(srcNodeGrp->flush_count==CkNodeSize(0))
     {
       for(int i=0;i<CkNumNodes();i++) {
@@ -166,6 +262,7 @@ void HTram::tflush() {
         }
       }
     }
+#endif
 #else
 #ifdef PER_DESTPE_BUFFER
   for(int i=0;i<CkNumPes();i++) {
