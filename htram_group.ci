@@ -16,7 +16,7 @@ module htram_group{
   group HTram {
     entry HTram(CkGroupID, int, bool, double, bool);
     entry HTram(CkGroupID gid, CkCallback cb);
-    entry void insertValue(int value, int destPE);
+//    entry void insertValue(int value, int destPE);
     entry void tflush();
 #ifdef SRC_GROUPING
     entry void receivePerPE(HTramMessage*);

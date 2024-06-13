@@ -48,12 +48,12 @@ HTram::HTram(CkGroupID cgid, CkCallback ecb){
 #endif
 }
 
-void HTram::set_func_ptr(void (*func)(void*, int), void* obPtr) {
+void HTram::set_func_ptr(void (*func)(void*, datatype), void* obPtr) {
   cb = func;
   objPtr = obPtr;
 }
 
-void HTram::set_func_ptr_retarr(void (*func)(void*, int*, int), void* obPtr) {
+void HTram::set_func_ptr_retarr(void (*func)(void*, datatype*, int), void* obPtr) {
   cb_retarr = func;
   objPtr = obPtr;
 }
@@ -62,7 +62,7 @@ HTram::HTram(CkMigrateMessage* msg) {}
 
 //one per node, message, fixed 
 //Client inserts
-void HTram::insertValue(int value, int dest_pe) {
+void HTram::insertValue(datatype value, int dest_pe) {
   int destNode = dest_pe/CkNodeSize(0); //find safer way to find dest node,
   // node size is not always same
 #ifdef NODE_SRC_BUFFER
@@ -213,7 +213,7 @@ HTramNodeGrp::HTramNodeGrp(CkMigrateMessage* msg) {}
 
 HTramRecv::HTramRecv(){
 }
-
+#if 0
 bool comparePayload(itemT a, itemT b)
 {
     return (a.payload > b.payload);
@@ -226,6 +226,7 @@ bool lower(itemT a, double value) {
 bool upper(itemT a, double value) {
   return a.payload > value;
 }
+#endif
 
 HTramRecv::HTramRecv(CkMigrateMessage* msg) {}
 
