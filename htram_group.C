@@ -8,10 +8,12 @@ HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, doubl
   flush_time = time_in_ms;
   client_gid = cgid;
   enable_flush = enable_buffer_flushing;
-  use_src_grouping = true; //doesn't work
+  use_src_grouping = false; //doesn't work
   use_src_agg = false; //works
   use_per_destpe_agg = false; //works
-  use_per_destnode_agg = false; //works
+  use_per_destnode_agg = true; //works
+  if(use_per_destnode_agg)
+    if(thisIndex==0) CkPrintf("\nDest-node side grouping/sorting enabled (1 buffer per src-pe, per dest-node)\n");
   ret_list = !ret_item;
 //  cb = delivercb;
   myPE = CkMyPe();
@@ -41,6 +43,28 @@ HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, doubl
 //#endif
   if(enable_flush)
     periodic_tflush((void *) this, flush_time);
+}
+
+void HTram::set_src_grp(){
+  use_src_grouping = true;
+  use_src_agg = false;
+  use_per_destpe_agg = false;
+  use_per_destnode_agg = false;
+  if(thisIndex==0) CkPrintf("\nSrc-side grouping/sorting by dest ranks (1 buffer per src-pe, per dest-node)\n");
+}
+void HTram::set_src_agg(){
+  use_src_grouping = false;
+  use_src_agg = true;
+  use_per_destpe_agg = false;
+  use_per_destnode_agg = false;
+  if(thisIndex==0) CkPrintf("\nSrc-side aggregation (1 buffer per src-node, per dest-node)\n");
+}
+void HTram::set_per_destpe(){
+  use_src_grouping = false;
+  use_src_agg = false;
+  use_per_destpe_agg = true;
+  use_per_destnode_agg = false;
+  if(thisIndex==0) CkPrintf("\nNo node-level buffers (1 buffer per src-pe, per dest-pe\n");
 }
 
 HTram::HTram(CkGroupID cgid, CkCallback ecb){

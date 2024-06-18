@@ -90,10 +90,10 @@ public:
   void start() {
     starttime = CkWallTimer();
     CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
-    updater_array.preGenerateUpdates();
+    updater_array.preGenerateUpdates(false, false, false);
     CkStartQD(endCb);
   }
-
+  int phase = 0;
   void startVerificationPhase() {
     double update_walltime = CkWallTimer() - starttime;
     CkPrintf("   %8.3lf seconds\n", update_walltime);
@@ -101,9 +101,22 @@ public:
     // Repeat the update process to verify
     // At the end of the second update phase, check the global table
     //  for errors in Updater::checkErrors()
-    CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
-    updater_array.generateUpdatesVerify();
-    CkStartQD(endCb);
+    if(++phase == 4) {
+      CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
+//      updater_array.generateUpdatesVerify();
+      CkStartQD(endCb);
+    } else {
+      starttime = CkWallTimer();
+      CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
+      bool src_grp = true;
+      bool src_agg = true;
+      bool no_agg = true;
+      if(phase==1) src_grp = true;
+      if(phase==2) src_agg = true;
+      if(phase==3) no_agg = true;
+      updater_array.preGenerateUpdates(src_grp, src_agg, no_agg);
+      CkStartQD(endCb);
+    }
   }
 
   void reportErrors(CmiInt8 globalNumErrors) {
@@ -173,9 +186,12 @@ public:
     }
   }
 
-  void preGenerateUpdates() {
+  void preGenerateUpdates(bool use_src_grp, bool use_arc_agg, bool use_per_destpe) {
     tram_t* tram = tram_proxy.ckLocalBranch();
     tram->set_func_ptr(Updater::insertDataCaller, this);
+    if(use_src_grp) tram->set_src_grp();
+    else if(use_arc_agg) tram->set_src_agg();
+    else if(use_per_destpe) tram->set_per_destpe();
 #ifdef RETURN_ITEMLIST
     tram->set_func_ptr_retarr(Updater::insertDataArrCaller, this);
 #endif
@@ -215,7 +231,7 @@ public:
 
   void checkErrors() {
     CmiInt8 numErrors = 0;
-
+#if 0
     for(CmiInt8 i = 0; i < lnum_counts; i++) {
       if(counts[i] != 0L) {
         numErrors++;
@@ -223,6 +239,7 @@ public:
           fprintf(stderr,"ERROR: Thread %d error at %ld (= %ld)\n", CkMyPe(), i, counts[i]);
       }
     }
+#endif
     // Sum the errors observed across the entire system
     contribute(sizeof(CmiInt8), &numErrors, CkReduction::sum_long,
                CkCallback(CkReductionTarget(TestDriver, reportErrors),

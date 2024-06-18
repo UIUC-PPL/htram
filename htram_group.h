@@ -102,6 +102,9 @@ class HTram : public CBase_HTram {
     int getAggregatingPE(int dest_pe);
     void copyToNodeBuf(int destnode, int increment);
     void insertValue(datatype send_value, int dest_pe);
+    void set_src_grp();
+    void set_src_agg();
+    void set_per_destpe();
     void tflush();
 //#ifdef SRC_GROUPING
     void receivePerPE(HTramMessage *);
