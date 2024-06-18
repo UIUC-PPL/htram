@@ -13,8 +13,8 @@
 using namespace std;
 #define BUFSIZE 1024
 #define LOCAL_BUFSIZE 16
-#define PPN_COUNT 64
-#define NODE_COUNT 32
+#define PPN_COUNT 8
+#define NODE_COUNT 64
 
 template <typename T>
 struct item {

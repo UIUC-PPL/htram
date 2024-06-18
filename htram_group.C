@@ -201,7 +201,7 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
 void HTram::tflush() {
   if(use_src_agg) {
     HTramNodeGrp* srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
-    srcNodeGrp->flush_count++;
+    int flush_count = srcNodeGrp->flush_count.fetch_add(1, std::memory_order_seq_cst);
     //Send your local buffer
     for(int i=0;i<CkNumNodes();i++) {
       local_buf[i]->next = local_idx[i];
@@ -210,7 +210,7 @@ void HTram::tflush() {
       local_idx[i] = 0;
     }
     //If you're last rank on node to flush, then flush your buffer and by setting idx to a high count, node level buffer as well
-    if(srcNodeGrp->flush_count==CkNodeSize(0))
+    if(flush_count+1==CkNodeSize(0))
     {
       for(int i=0;i<CkNumNodes();i++) {
         if(srcNodeGrp->done_count[i]) {
@@ -223,9 +223,9 @@ void HTram::tflush() {
   */
           nodeGrpProxy[i].receive(srcNodeGrp->msgBuffers[i]);
           srcNodeGrp->msgBuffers[i] = new HTramMessage();
-          srcNodeGrp->get_idx[i] = 0;
           srcNodeGrp->done_count[i] = 0;
           srcNodeGrp->flush_count = 0;
+          srcNodeGrp->get_idx[i] = 0;
         }
       }
     }
