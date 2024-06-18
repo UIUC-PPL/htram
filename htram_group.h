@@ -4,6 +4,7 @@
 //#define PER_DESTPE_BUFFER
 //#define NODE_SRC_BUFFER
 //#define LOCAL_BUF
+#define ALL_BUF_TYPES
 #include "htram_group.decl.h"
 /* readonly */ extern CProxy_HTram tram_proxy;
 /* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
@@ -17,9 +18,9 @@ using namespace std;
 
 template <typename T>
 struct item {
-#if !defined(SRC_GROUPING) && !defined(PER_DESTPE_BUFFER)
+//#if !defined(SRC_GROUPING) && !defined(PER_DESTPE_BUFFER)
   int destPe;
-#endif
+//#endif
   T payload;
 };
 
@@ -35,9 +36,9 @@ class HTramMessage : public CMessage_HTramMessage {
       std::copy(buf, buf+size, buffer);
     }
     itemT buffer[BUFSIZE];
-#ifdef SRC_GROUPING
+//#ifdef SRC_GROUPING
     int index[PPN_COUNT] = {-1};
-#endif
+//#endif
     int next; //next available slot in buffer
 };
 
@@ -83,6 +84,7 @@ class HTram : public CBase_HTram {
     CkCallback endCb;
     int myPE;
     bool ret_list;
+    bool use_src_grouping, use_src_agg, use_per_destpe_agg, use_per_destnode_agg;
     double flush_time;
     int local_idx[NODE_COUNT];
     void* objPtr;
@@ -101,13 +103,13 @@ class HTram : public CBase_HTram {
     void copyToNodeBuf(int destnode, int increment);
     void insertValue(datatype send_value, int dest_pe);
     void tflush();
-#ifdef SRC_GROUPING
+//#ifdef SRC_GROUPING
     void receivePerPE(HTramMessage *);
-#elif defined PER_DESTPE_BUFFER
+//#elif defined PER_DESTPE_BUFFER
     void receiveOnPE(HTramMessage* msg);
-#else
+//#else
     void receivePerPE(HTramNodeMessage *);
-#endif
+//#endif
     void registercb();
     void stop_periodic_flush();
 };
@@ -119,9 +121,10 @@ class HTramRecv : public CBase_HTramRecv {
   public:
     HTramRecv();
     HTramRecv(CkMigrateMessage* msg);
-#ifndef PER_DESTPE_BUFFER
+//#ifndef PER_DESTPE_BUFFER
     void receive(HTramMessage*);
+    void receive_no_sort(HTramMessage*);
     void receive_small(HTramLocalMessage*);
-#endif
+//#endif
 };
 #endif

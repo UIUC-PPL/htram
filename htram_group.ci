@@ -23,13 +23,13 @@ module htram_group{
     entry HTram(CkGroupID, int, bool, double, bool);
     entry HTram(CkGroupID gid, CkCallback cb);
     entry void tflush();
-#ifdef SRC_GROUPING
+//#ifdef SRC_GROUPING
     entry void receivePerPE(HTramMessage*);
-#elif defined PER_DESTPE_BUFFER
+//#elif defined PER_DESTPE_BUFFER
     entry void receiveOnPE(HTramMessage* msg);
-#else
+//#else
     entry void receivePerPE(HTramNodeMessage*);
-#endif
+//#endif
     entry void stop_periodic_flush();
   };
 
@@ -39,11 +39,12 @@ module htram_group{
 
   nodegroup HTramRecv {
     entry HTramRecv();
-#ifndef PER_DESTPE_BUFFER
+//#ifndef PER_DESTPE_BUFFER
     entry void receive(HTramMessage*);
-#ifdef LOCAL_BUF
+    entry void receive_no_sort(HTramMessage*);
+//#ifdef LOCAL_BUF
     entry void receive_small(HTramLocalMessage*);
-#endif
-#endif
+//#endif
+//#endif
   }
 };
