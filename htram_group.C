@@ -64,7 +64,7 @@ void HTram::set_per_destpe(){
   use_src_agg = false;
   use_per_destpe_agg = true;
   use_per_destnode_agg = false;
-  if(thisIndex==0) CkPrintf("\nNo node-level buffers (1 buffer per src-pe, per dest-pe\n");
+  if(thisIndex==0) CkPrintf("\nNo node-level buffers (1 buffer per src-pe, per dest-pe)\n");
 }
 
 HTram::HTram(CkGroupID cgid, CkCallback ecb){

@@ -108,9 +108,9 @@ public:
     } else {
       starttime = CkWallTimer();
       CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
-      bool src_grp = true;
-      bool src_agg = true;
-      bool no_agg = true;
+      bool src_grp = false;
+      bool src_agg = false;
+      bool no_agg = false;
       if(phase==1) src_grp = true;
       if(phase==2) src_agg = true;
       if(phase==3) no_agg = true;
