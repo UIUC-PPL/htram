@@ -2,7 +2,7 @@
 #define __HTRAM_H__
 //#define SRC_GROUPING
 //#define PER_DESTPE_BUFFER
-#define NODE_SRC_BUFFER
+//#define NODE_SRC_BUFFER
 //#define LOCAL_BUF
 #include "htram_group.decl.h"
 /* readonly */ extern CProxy_HTram tram_proxy;

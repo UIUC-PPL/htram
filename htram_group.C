@@ -135,21 +135,13 @@ void HTram::insertValue(datatype value, int dest_pe) {
 #endif
 
 #ifdef NODE_SRC_BUFFER
-#ifdef LOCAL_BUF
-  {
- // if(local_buf_full)
- // if(done_idx == BUFSIZE) {
- //   nodeBuffer->next = done_idx;
-#else
   if(done_idx+1 == BUFSIZE) {
     nodeBuffer->next = done_idx+1;
-#endif
 /*
     CkPrintf("\n[PE-%d]Sending out data with size = %d", thisIndex, nodeBuffer->next);
     for(int i=0;i<nodeBuffer->next;i++)
     CkPrintf("\nvalue=%d, pe=%d", nodeBuffer->buffer[i].payload, nodeBuffer->buffer[i].destPe);
 */
-
     srcNodeGrp->msgBuffers[destNode] = new HTramMessage();//localMsgBuffer;
     srcNodeGrp->done_count[destNode] = 0;
     srcNodeGrp->get_idx[destNode] = 0;
@@ -185,16 +177,14 @@ void HTram::registercb() {
 }
 
 void HTram::copyToNodeBuf(int destnode, int increment) {
-#ifdef NODE_SRC_BUFFER
+#ifdef LOCAL_BUF
   HTramNodeGrp* srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
-#endif
 
 // Get atomic index
   int idx = srcNodeGrp->get_idx[destnode].fetch_add(increment, std::memory_order_release);
   while(idx >= BUFSIZE) {
     idx = srcNodeGrp->get_idx[destnode].fetch_add(increment, std::memory_order_release);
   }
-//  CkPrintf("\nPE-%d received idx %d for destnode = %d", CkMyPe(), idx, destnode);
 
 // Copy data into node buffer from PE-local buffer
   int i;
@@ -202,19 +192,17 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
     srcNodeGrp->msgBuffers[destnode]->buffer[idx+i].payload = local_buf[destnode]->buffer[i].payload;
     srcNodeGrp->msgBuffers[destnode]->buffer[idx+i].destPe = local_buf[destnode]->buffer[i].destPe;
   }
- 
-  int done_count = srcNodeGrp->done_count[destnode].fetch_add(increment, std::memory_order_release);
 
-// If copying fills the node buffer entirely, send data and create new buffer
+  int done_count = srcNodeGrp->done_count[destnode].fetch_add(increment, std::memory_order_release);
   if(done_count+increment == BUFSIZE) {
-//    CkPrintf("\nSending from PE %d", CkMyPe());
     srcNodeGrp->msgBuffers[destnode]->next = BUFSIZE;
     nodeGrpProxy[destnode].receive(srcNodeGrp->msgBuffers[destnode]);
     srcNodeGrp->msgBuffers[destnode] = new HTramMessage();
     srcNodeGrp->done_count[destnode] = 0;
     srcNodeGrp->get_idx[destnode] = 0;
-  }  
+  }
   local_idx[destnode] = 0;
+#endif
 }
 
 void HTram::tflush() {
@@ -224,7 +212,6 @@ void HTram::tflush() {
 #ifdef NODE_SRC_BUFFER
     srcNodeGrp->flush_count++;
 #ifdef LOCAL_BUF
-  
 //Send your local buffer
   for(int i=0;i<CkNumNodes();i++) {
     local_buf[i]->next = local_idx[i];
@@ -387,7 +374,7 @@ void HTramRecv::receive_small(HTramLocalMessage* agg_message) {
   HTramNodeMessage* sorted_agg_message = new HTramNodeMessage();
 
   int sizes[PPN_COUNT] = {0};
-    
+
   for(int i=0;i<agg_message->next;i++) {
     int rank = agg_message->buffer[i].destPe - rank0PE;
     sizes[rank]++;

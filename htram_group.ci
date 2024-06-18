@@ -18,6 +18,7 @@ module htram_group{
   };
 //#define SRC_GROUPING
 //#define PER_DESTPE_BUFFER
+//#define LOCAL_BUF
   group HTram {
     entry HTram(CkGroupID, int, bool, double, bool);
     entry HTram(CkGroupID gid, CkCallback cb);
@@ -40,7 +41,9 @@ module htram_group{
     entry HTramRecv();
 #ifndef PER_DESTPE_BUFFER
     entry void receive(HTramMessage*);
+#ifdef LOCAL_BUF
     entry void receive_small(HTramLocalMessage*);
+#endif
 #endif
   }
 };
