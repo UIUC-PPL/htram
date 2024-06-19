@@ -40,7 +40,7 @@ module htram_group{
   nodegroup HTramRecv {
     entry HTramRecv();
 //#ifndef PER_DESTPE_BUFFER
-    entry void receive(HTramMessage*);
+    entry [expedited] void receive(HTramMessage*);
     entry void receive_no_sort(HTramMessage*);
 //#ifdef LOCAL_BUF
     entry void receive_small(HTramLocalMessage*);
