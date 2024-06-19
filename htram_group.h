@@ -88,6 +88,7 @@ class HTram : public CBase_HTram {
     double flush_time;
     int local_idx[NODE_COUNT];
     void* objPtr;
+    HTramNodeGrp* srcNodeGrp;
     HTramMessage **msgBuffers;
     HTramLocalMessage **local_buf;
     HTramMessage *localMsgBuffer;

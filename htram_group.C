@@ -40,6 +40,7 @@ HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, doubl
     local_buf[i] = new HTramLocalMessage();
     local_idx[i] = 0;
   }
+  srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
 //#endif
   if(enable_flush)
     periodic_tflush((void *) this, flush_time);
@@ -97,16 +98,11 @@ HTram::HTram(CkMigrateMessage* msg) {}
 void HTram::insertValue(datatype value, int dest_pe) {
   int destNode = dest_pe/CkNodeSize(0); //find safer way to find dest node,
   // node size is not always same
-//#if defined(NODE_SRC_BUFFER ) || defined(ALL_BUF_TYPES)
-  HTramNodeGrp* srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
-
-  int increment = 1;
-  int idx = -1;
+#if 1
   if(use_src_agg) {
-//    idx = srcNodeGrp->get_idx[destNode].fetch_add(1, std::memory_order_seq_cst);
-//    while( idx+1 > BUFSIZE)
-//      idx = srcNodeGrp->get_idx[destNode].fetch_add(1, std::memory_order_seq_cst);
-//    HTramMessage *nodeBuffer = srcNodeGrp->msgBuffers[destNode];
+
+    int increment = 1;
+    int idx = -1;
     int idx_dnode = local_idx[destNode];
     if(idx_dnode<=LOCAL_BUFSIZE-1) {
       local_buf[destNode]->buffer[idx_dnode].payload = value;
@@ -124,7 +120,9 @@ void HTram::insertValue(datatype value, int dest_pe) {
     }
     return;
   }
-  else {
+  else
+#endif
+  {
     HTramMessage *destMsg;
     if(use_per_destpe_agg)
       destMsg = msgBuffers[dest_pe];
@@ -172,7 +170,6 @@ void HTram::registercb() {
 }
 
 void HTram::copyToNodeBuf(int destnode, int increment) {
-  HTramNodeGrp* srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
 
 // Get atomic index
   int idx = srcNodeGrp->get_idx[destnode].fetch_add(increment, std::memory_order_release);
@@ -200,7 +197,6 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
 
 void HTram::tflush() {
   if(use_src_agg) {
-    HTramNodeGrp* srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
     int flush_count = srcNodeGrp->flush_count.fetch_add(1, std::memory_order_seq_cst);
     //Send your local buffer
     for(int i=0;i<CkNumNodes();i++) {

@@ -77,12 +77,12 @@ public:
     // Initialize TRAM with appropriate arguments
     CkGroupID updater_array_gid;
     updater_array_gid = updater_array.ckGetGroupID();
-    tram_proxy = tram_proxy_t::ckNew(updater_array_gid, l_buffer_size, enable_buffer_flushing, static_cast<double>(l_flush_timer)/1000, return_item);
 
 #ifdef TRAM_SMP
     nodeGrpProxy = CProxy_HTramRecv::ckNew();
     srcNodeGrpProxy = CProxy_HTramNodeGrp::ckNew();
 #endif
+    tram_proxy = tram_proxy_t::ckNew(updater_array_gid, l_buffer_size, enable_buffer_flushing, static_cast<double>(l_flush_timer)/1000, return_item);
 
     delete args;
   }
