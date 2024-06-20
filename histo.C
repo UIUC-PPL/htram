@@ -94,18 +94,36 @@ public:
     CkStartQD(endCb);
   }
   int phase = 0;
+  double update_walltime;
   void startVerificationPhase() {
-    double update_walltime = CkWallTimer() - starttime;
-    CkPrintf("   %8.3lf seconds\n", update_walltime);
+    update_walltime = CkWallTimer() - starttime;
+//    CkPrintf("   %8.3lf seconds\n", update_walltime);
 
     // Repeat the update process to verify
     // At the end of the second update phase, check the global table
     //  for errors in Updater::checkErrors()
+    CkCallback cb(CkReductionTarget(TestDriver, ReceiveMsgStats), thisProxy);
     if(++phase == 4) {
+      tram_proxy.avgLatency(cb);
       CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
 //      updater_array.generateUpdatesVerify();
       CkStartQD(endCb);
     } else {
+      nodeGrpProxy.avgLatency(cb);
+    }
+  }
+
+  void ReceiveMsgStats(double* stats, int n) {
+   // for(int i=0;i<n;i++)
+   // CkPrintf("\nStats[%d] = %lf",i, stats[i]);
+    char* code[4];
+    code[0] = "PNs";
+    code[1] = "PsN";
+    code[2] = "NNs";
+    code[3] = "PP";
+ 
+    CkPrintf("\n***data: %s, %8.3lfs, %lfs, %lfs, %lfs, %lf", code[phase-1], update_walltime, stats[TOTAL_LATENCY]/CkNumPes(), stats[MAX_LATENCY], stats[MIN_LATENCY], stats[TOTAL_MSGS]);
+    if(phase < 4) {
       starttime = CkWallTimer();
       CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
       bool src_grp = false;

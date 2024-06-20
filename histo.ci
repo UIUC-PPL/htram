@@ -29,6 +29,7 @@ mainmodule histo {
     entry [reductiontarget] void start();
     entry [reductiontarget] void startVerificationPhase();
     entry [reductiontarget] void reportErrors(CmiInt8 globalNumErrors);
+    entry [reductiontarget] void ReceiveMsgStats(double stats[n], int n);
   };
 
   group Updater {

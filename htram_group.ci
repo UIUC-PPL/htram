@@ -2,6 +2,7 @@ module htram_group{
   readonly CProxy_HTram tram_proxy;
   readonly CProxy_HTramRecv nodeGrpProxy;
   readonly CProxy_HTramNodeGrp srcNodeGrpProxy;
+  initnode void registerMsgStatsCollection(void);
   message HTramMessage {
     itemT *buffer;
     int next; 
@@ -22,6 +23,7 @@ module htram_group{
   group HTram {
     entry HTram(CkGroupID, int, bool, double, bool);
     entry HTram(CkGroupID gid, CkCallback cb);
+    entry void avgLatency(CkCallback cb);
     entry void tflush();
 //#ifdef SRC_GROUPING
     entry void receivePerPE(HTramMessage*);
@@ -44,6 +46,7 @@ module htram_group{
     entry void receive_no_sort(HTramMessage*);
 //#ifdef LOCAL_BUF
     entry void receive_small(HTramLocalMessage*);
+    entry void avgLatency(CkCallback cb);
 //#endif
 //#endif
   }

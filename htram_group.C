@@ -1,6 +1,32 @@
 #include "htram_group.h"
 //#define DEBUG 1
 
+CkReductionMsg* msgStatsCollection(int nMsg, CkReductionMsg** rdmsgs) {
+  double *msg_stats;
+  msg_stats = (double*)rdmsgs[0]->getData();
+//  CkPrintf("\nInside reducer: %lf, %lf, %lf, %lf", msg_stats[0], msg_stats[1], msg_stats[2], msg_stats[3]);
+  for (int i = 1; i < nMsg; i++) {
+    CkAssert(rdmsgs[i]->getSize() == STATS_COUNT*sizeof(double));
+    if (rdmsgs[i]->getSize() != STATS_COUNT*sizeof(double)) {
+      CkPrintf("Error!!! Reduction not correct. Msg size is %d\n",
+          rdmsgs[i]->getSize());
+      CkAbort("Incorrect Reduction size in MetaBalancer\n");
+    }
+    
+    double* m = (double *)rdmsgs[i]->getData();
+    msg_stats[TOTAL_LATENCY] += m[TOTAL_LATENCY];
+    msg_stats[MAX_LATENCY] = max(m[MAX_LATENCY], msg_stats[MAX_LATENCY]);
+    msg_stats[MIN_LATENCY] = min(m[MIN_LATENCY], msg_stats[MIN_LATENCY]);
+    msg_stats[TOTAL_MSGS] += m[TOTAL_MSGS];
+  }
+  return CkReductionMsg::buildNew(rdmsgs[0]->getSize(), NULL, rdmsgs[0]->getReducer(), rdmsgs[0]);
+}
+
+/*global*/ CkReduction::reducerType msgStatsCollectionType;
+/*initnode*/ void registerMsgStatsCollection(void) {
+  msgStatsCollectionType = CkReduction::addReducer(msgStatsCollection, true, "msgStatsCollection");
+}
+
 void periodic_tflush(void *htram_obj, double time);
 
 HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, double time_in_ms, bool ret_item) {
@@ -8,12 +34,15 @@ HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, doubl
   flush_time = time_in_ms;
   client_gid = cgid;
   enable_flush = enable_buffer_flushing;
+  msg_stats[MIN_LATENCY] = 100.0;
   use_src_grouping = false;
   use_src_agg = false;
   use_per_destpe_agg = false;
   use_per_destnode_agg = true;
+/*
   if(use_per_destnode_agg)
     if(thisIndex==0) CkPrintf("\nDest-node side grouping/sorting enabled (1 buffer per src-pe, per dest-node)\n");
+*/
   ret_list = !ret_item;
 
   myPE = CkMyPe();
@@ -33,31 +62,65 @@ HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, doubl
     local_idx[i] = 0;
   }
   srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
+  nodeGrp = (HTramRecv*)nodeGrpProxy.ckLocalBranch();
 
   if(enable_flush)
     periodic_tflush((void *) this, flush_time);
 }
 
 void HTram::set_src_grp(){
+  std::fill_n(msg_stats, STATS_COUNT, 0);
+  msg_stats[MIN_LATENCY] = 100.0;
+  std::fill_n(nodeGrp->msg_stats, STATS_COUNT, 0);
+  nodeGrp->msg_stats[MIN_LATENCY] = 100.0;
   use_src_grouping = true;
   use_src_agg = false;
   use_per_destpe_agg = false;
   use_per_destnode_agg = false;
-  if(thisIndex==0) CkPrintf("\nSrc-side grouping/sorting by dest ranks (1 buffer per src-pe, per dest-node)\n");
+//  if(thisIndex==0) CkPrintf("\nSrc-side grouping/sorting by dest ranks (1 buffer per src-pe, per dest-node)\n");
 }
 void HTram::set_src_agg(){
+  std::fill_n(msg_stats, STATS_COUNT, 0);
+  msg_stats[MIN_LATENCY] = 100.0;
+  std::fill_n(nodeGrp->msg_stats, STATS_COUNT, 0);
+  nodeGrp->msg_stats[MIN_LATENCY] = 100.0;
   use_src_grouping = false;
   use_src_agg = true;
   use_per_destpe_agg = false;
   use_per_destnode_agg = false;
-  if(thisIndex==0) CkPrintf("\nSrc-side aggregation (1 buffer per src-node, per dest-node)\n");
+//  if(thisIndex==0) CkPrintf("\nSrc-side aggregation (1 buffer per src-node, per dest-node)\n");
 }
 void HTram::set_per_destpe(){
+  std::fill_n(msg_stats, STATS_COUNT, 0);
+  msg_stats[MIN_LATENCY] = 100.0;
+  std::fill_n(nodeGrp->msg_stats, STATS_COUNT, 0);
+  nodeGrp->msg_stats[MIN_LATENCY] = 100.0;
   use_src_grouping = false;
   use_src_agg = false;
   use_per_destpe_agg = true;
   use_per_destnode_agg = false;
-  if(thisIndex==0) CkPrintf("\nNo node-level buffers (1 buffer per src-pe, per dest-pe)\n");
+//  if(thisIndex==0) CkPrintf("\nNo node-level buffers (1 buffer per src-pe, per dest-pe)\n");
+}
+
+void HTram::avgLatency(CkCallback cb){
+  return_cb = cb;
+  msg_stats[TOTAL_LATENCY] /= (2*msg_stats[TOTAL_MSGS]);
+//  CkPrintf("\n%lf, %lf, %lf, %lf", msg_stats[0], msg_stats[1], msg_stats[2], msg_stats[3]);
+//  double avg = total_latency/total_msg_count;
+//  CkCallback cb(CkReductionTarget(MetaBalancer, ReceiveMinStats),
+//        thisProxy[0]);
+  contribute(STATS_COUNT*sizeof(double), msg_stats, msgStatsCollectionType, cb);
+//  CkPrintf("\navg = %lf", avg);
+//  contribute(sizeof(double), &avg, CkReduction::sum_double, CkCallback(CkReductionTarget(HTram, printAvgLatency), thisProxy));
+}
+
+void HTramRecv::avgLatency(CkCallback cb){
+  return_cb = cb;
+  msg_stats[TOTAL_LATENCY] /= (2*msg_stats[TOTAL_MSGS]);
+//  CkPrintf("\n%lf, %lf, %lf, %lf", msg_stats[0], msg_stats[1], msg_stats[2], msg_stats[3]);
+//  double avg = total_latency/total_msg_count;
+//  contribute(sizeof(double), &avg, CkReduction::sum_double, CkCallback(CkReductionTarget(HTramRecv, printAvgLatency), thisProxy));
+  contribute(STATS_COUNT*sizeof(double), msg_stats, msgStatsCollectionType, cb);
 }
 
 HTram::HTram(CkGroupID cgid, CkCallback ecb){
@@ -90,9 +153,8 @@ HTram::HTram(CkMigrateMessage* msg) {}
 void HTram::insertValue(datatype value, int dest_pe) {
   int destNode = dest_pe/CkNodeSize(0); //find safer way to find dest node,
   // node size is not always same
-
+  
   if(use_src_agg) {
-
     int increment = 1;
     int idx = -1;
     int idx_dnode = local_idx[destNode];
@@ -125,6 +187,10 @@ void HTram::insertValue(datatype value, int dest_pe) {
       destMsg->buffer[destMsg->next].payload = value;
       destMsg->buffer[destMsg->next].destPe = dest_pe;
     }
+
+    if(destMsg->next == 0 || destMsg->next == BUFSIZE-1)
+      destMsg->timer[destMsg->next/(BUFSIZE-1)] = CkWallTimer();
+
     destMsg->next++;
     if(destMsg->next == BUFSIZE) {
       if(use_src_grouping) {
@@ -163,6 +229,9 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
   while(idx >= BUFSIZE) {
     idx = srcNodeGrp->get_idx[destnode].fetch_add(increment, std::memory_order_relaxed);
   }
+
+  if(idx==0 || idx == BUFSIZE-increment)
+    srcNodeGrp->msgBuffers[destnode]->timer[idx/(BUFSIZE-increment)] = CkWallTimer();
 
 // Copy data into node buffer from PE-local buffer
   int i;
@@ -257,6 +326,7 @@ HTramNodeGrp::HTramNodeGrp(CkMigrateMessage* msg) {}
 
 
 HTramRecv::HTramRecv(){
+  msg_stats[MIN_LATENCY] = 100.0;
 }
 
 #if 0
@@ -277,14 +347,29 @@ bool upper(itemT a, double value) {
 HTramRecv::HTramRecv(CkMigrateMessage* msg) {}
 
 //#ifdef SRC_GROUPING
-  void HTramRecv::receive_no_sort(HTramMessage* agg_message) {
-    for(int i=CkNodeFirst(CkMyNode()); i < CkNodeFirst(CkMyNode())+CkNodeSize(0);i++) {
-      HTramMessage* tmpMsg = (HTramMessage*)CkReferenceMsg(agg_message);
-      _SET_USED(UsrToEnv(tmpMsg), 0);
-      tram_proxy[i].receivePerPE(tmpMsg);
-    }
-    CkFreeMsg(agg_message);
+void HTramRecv::receive_no_sort(HTramMessage* agg_message) {
+  double time_stamp = CkWallTimer();
+  double latency[2];
+  for(int i=0;i<2;i++) {
+    latency[i] = time_stamp - agg_message->timer[i];
+    msg_stats[TOTAL_LATENCY] += latency[i];
   }
+  double max = std::max(latency[0], latency[1]);
+  if(msg_stats[MAX_LATENCY] < max)
+    msg_stats[MAX_LATENCY] = max;
+  double min = std::min(latency[0], latency[1]);
+  if(msg_stats[MIN_LATENCY] > min)
+    msg_stats[MIN_LATENCY] = min;
+  msg_stats[TOTAL_MSGS] += 1.0;
+
+
+  for(int i=CkNodeFirst(CkMyNode()); i < CkNodeFirst(CkMyNode())+CkNodeSize(0);i++) {
+    HTramMessage* tmpMsg = (HTramMessage*)CkReferenceMsg(agg_message);
+    _SET_USED(UsrToEnv(tmpMsg), 0);
+    tram_proxy[i].receivePerPE(tmpMsg);
+  }
+  CkFreeMsg(agg_message);
+}
 
   void HTram::receivePerPE(HTramMessage* msg) {
     int llimit = 0;
@@ -298,13 +383,42 @@ HTramRecv::HTramRecv(CkMigrateMessage* msg) {}
   }
 
 //#elif defined PER_DESTPE_BUFFER
-  void HTram::receiveOnPE(HTramMessage* msg) {
-    for(int i=0;i<msg->next;i++)
-      cb(objPtr, msg->buffer[i].payload);
-    delete msg;
+void HTram::receiveOnPE(HTramMessage* msg) {
+//    CkPrintf("\ntotal_latency=%lfs",total_latency);
+  double time_stamp = CkWallTimer();
+  double latency[2];
+  for(int i=0;i<2;i++) {
+    latency[i] = time_stamp - msg->timer[i];
+    msg_stats[TOTAL_LATENCY] += latency[i];
   }
+  double max = std::max(latency[0], latency[1]);
+  if(msg_stats[MAX_LATENCY] < max)
+    msg_stats[MAX_LATENCY] = max;
+  double min = std::min(latency[0], latency[1]);
+  if(msg_stats[MIN_LATENCY] > min)
+    msg_stats[MIN_LATENCY] = min;
+  msg_stats[TOTAL_MSGS] += 1;
+
+  for(int i=0;i<msg->next;i++)
+    cb(objPtr, msg->buffer[i].payload);
+  delete msg;
+}
 //#else
 void HTramRecv::receive(HTramMessage* agg_message) {
+  double time_stamp = CkWallTimer();
+  double latency[2];
+  for(int i=0;i<2;i++) {
+    latency[i] = time_stamp - agg_message->timer[i];
+    msg_stats[TOTAL_LATENCY] += latency[i];
+  }
+  double max = std::max(latency[0], latency[1]);
+  if(msg_stats[MAX_LATENCY] < max)
+    msg_stats[MAX_LATENCY] = max;
+  double min = std::min(latency[0], latency[1]);
+  if(msg_stats[MIN_LATENCY] > min)
+    msg_stats[MIN_LATENCY] = min;
+  msg_stats[TOTAL_MSGS] += 1;
+
   //broadcast to each PE and decr refcount
   //nodegroup //reference from group
   int rank0PE = CkNodeFirst(thisIndex);
