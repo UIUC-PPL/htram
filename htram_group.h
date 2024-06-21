@@ -46,6 +46,7 @@ class HTramMessage : public CMessage_HTramMessage {
     int index[PPN_COUNT] = {-1};
 //#endif
     double timer[2];
+    int do_timer {1};
     int next; //next available slot in buffer
 };
 

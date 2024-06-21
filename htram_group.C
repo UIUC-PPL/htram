@@ -188,8 +188,12 @@ void HTram::insertValue(datatype value, int dest_pe) {
       destMsg->buffer[destMsg->next].destPe = dest_pe;
     }
 
-    if(destMsg->next == 0 || destMsg->next == BUFSIZE-1)
-      destMsg->timer[destMsg->next/(BUFSIZE-1)] = CkWallTimer();
+    if(destMsg->next == 0 || destMsg->next == BUFSIZE-1) {
+      if(destMsg->next == 0)
+        destMsg->timer[0] = CkWallTimer();
+      else
+        destMsg->timer[1] = CkWallTimer();
+    }
 
     destMsg->next++;
     if(destMsg->next == BUFSIZE) {
@@ -273,6 +277,7 @@ void HTram::tflush() {
           for(int j=0;j<srcNodeGrp->msgBuffers[i]->next;j++)
             CkPrintf("\nTFvalue=%d, pe=%d", srcNodeGrp->msgBuffers[i]->buffer[j].payload, srcNodeGrp->msgBuffers[i]->buffer[j].destPe);
   */
+          srcNodeGrp->msgBuffers[i]->do_timer = 0;
           nodeGrpProxy[i].receive(srcNodeGrp->msgBuffers[i]);
           srcNodeGrp->msgBuffers[i] = new HTramMessage();//localMsgBuffer;
           srcNodeGrp->done_count[i] = 0;
@@ -290,9 +295,10 @@ void HTram::tflush() {
     for(int i=0;i<buf_count;i++) {
       if(msgBuffers[i]->next)
       {
+        HTramMessage *destMsg = msgBuffers[i];
+        destMsg->do_timer = 0;
         if(use_src_grouping) {
           int destNode = i;
-          HTramMessage *destMsg = msgBuffers[i];
           int sz = 0;
           for(int k=0;k<CkNodeSize(0);k++) {
             std::vector<itemT> localMsg = localBuffers[destNode*CkNodeSize(0)+k];
@@ -304,9 +310,9 @@ void HTram::tflush() {
           nodeGrpProxy[i].receive_no_sort(destMsg);
         }
         else if(use_per_destnode_agg)
-          nodeGrpProxy[i].receive(msgBuffers[i]); //only upto next
+          nodeGrpProxy[i].receive(destMsg); //todo - Resize only upto next
         else if(use_per_destpe_agg) 
-          thisProxy[i].receiveOnPE(msgBuffers[i]);
+          thisProxy[i].receiveOnPE(destMsg);
         msgBuffers[i] = new HTramMessage();
       }
     }
@@ -348,20 +354,21 @@ HTramRecv::HTramRecv(CkMigrateMessage* msg) {}
 
 //#ifdef SRC_GROUPING
 void HTramRecv::receive_no_sort(HTramMessage* agg_message) {
-  double time_stamp = CkWallTimer();
-  double latency[2];
-  for(int i=0;i<2;i++) {
-    latency[i] = time_stamp - agg_message->timer[i];
-    msg_stats[TOTAL_LATENCY] += latency[i];
+  if(agg_message->do_timer) {
+    double time_stamp = CkWallTimer();
+    double latency[2];
+    for(int i=0;i<2;i++) {
+      latency[i] = time_stamp - agg_message->timer[i];
+      msg_stats[TOTAL_LATENCY] += latency[i];
+    }
+    double max = std::max(latency[0], latency[1]);
+    if(msg_stats[MAX_LATENCY] < max)
+      msg_stats[MAX_LATENCY] = max;
+    double min = std::min(latency[0], latency[1]);
+    if(msg_stats[MIN_LATENCY] > min)
+      msg_stats[MIN_LATENCY] = min;
+    msg_stats[TOTAL_MSGS] += 1.0;
   }
-  double max = std::max(latency[0], latency[1]);
-  if(msg_stats[MAX_LATENCY] < max)
-    msg_stats[MAX_LATENCY] = max;
-  double min = std::min(latency[0], latency[1]);
-  if(msg_stats[MIN_LATENCY] > min)
-    msg_stats[MIN_LATENCY] = min;
-  msg_stats[TOTAL_MSGS] += 1.0;
-
 
   for(int i=CkNodeFirst(CkMyNode()); i < CkNodeFirst(CkMyNode())+CkNodeSize(0);i++) {
     HTramMessage* tmpMsg = (HTramMessage*)CkReferenceMsg(agg_message);
@@ -385,19 +392,21 @@ void HTramRecv::receive_no_sort(HTramMessage* agg_message) {
 //#elif defined PER_DESTPE_BUFFER
 void HTram::receiveOnPE(HTramMessage* msg) {
 //    CkPrintf("\ntotal_latency=%lfs",total_latency);
-  double time_stamp = CkWallTimer();
-  double latency[2];
-  for(int i=0;i<2;i++) {
-    latency[i] = time_stamp - msg->timer[i];
-    msg_stats[TOTAL_LATENCY] += latency[i];
+  if(msg->do_timer) {
+    double time_stamp = CkWallTimer();
+    double latency[2];
+    for(int i=0;i<2;i++) {
+      latency[i] = time_stamp - msg->timer[i];
+      msg_stats[TOTAL_LATENCY] += latency[i];
+    }
+    double max = std::max(latency[0], latency[1]);
+    if(msg_stats[MAX_LATENCY] < max)
+      msg_stats[MAX_LATENCY] = max;
+    double min = std::min(latency[0], latency[1]);
+    if(msg_stats[MIN_LATENCY] > min)
+      msg_stats[MIN_LATENCY] = min;
+    msg_stats[TOTAL_MSGS] += 1;
   }
-  double max = std::max(latency[0], latency[1]);
-  if(msg_stats[MAX_LATENCY] < max)
-    msg_stats[MAX_LATENCY] = max;
-  double min = std::min(latency[0], latency[1]);
-  if(msg_stats[MIN_LATENCY] > min)
-    msg_stats[MIN_LATENCY] = min;
-  msg_stats[TOTAL_MSGS] += 1;
 
   for(int i=0;i<msg->next;i++)
     cb(objPtr, msg->buffer[i].payload);
@@ -405,19 +414,22 @@ void HTram::receiveOnPE(HTramMessage* msg) {
 }
 //#else
 void HTramRecv::receive(HTramMessage* agg_message) {
-  double time_stamp = CkWallTimer();
-  double latency[2];
-  for(int i=0;i<2;i++) {
-    latency[i] = time_stamp - agg_message->timer[i];
-    msg_stats[TOTAL_LATENCY] += latency[i];
+  if(agg_message->do_timer) {
+    double time_stamp = CkWallTimer();
+    double latency[2];
+    for(int i=0;i<2;i++) {
+      latency[i] = time_stamp - agg_message->timer[i];
+      if(latency[i] > 0.1) CkPrintf("\nlatency = %lfs (%lf - %lf)", latency[i], time_stamp, agg_message->timer[i]);
+      msg_stats[TOTAL_LATENCY] += latency[i];
+    }
+    double max = std::max(latency[0], latency[1]);
+    if(msg_stats[MAX_LATENCY] < max)
+      msg_stats[MAX_LATENCY] = max;
+    double min = std::min(latency[0], latency[1]);
+    if(msg_stats[MIN_LATENCY] > min)
+      msg_stats[MIN_LATENCY] = min;
+    msg_stats[TOTAL_MSGS] += 1;
   }
-  double max = std::max(latency[0], latency[1]);
-  if(msg_stats[MAX_LATENCY] < max)
-    msg_stats[MAX_LATENCY] = max;
-  double min = std::min(latency[0], latency[1]);
-  if(msg_stats[MIN_LATENCY] > min)
-    msg_stats[MIN_LATENCY] = min;
-  msg_stats[TOTAL_MSGS] += 1;
 
   //broadcast to each PE and decr refcount
   //nodegroup //reference from group
