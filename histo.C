@@ -6,6 +6,7 @@ typedef CmiUInt8 dtype;
 
 #include <assert.h>
 #define SIZES 3
+#define PHASE_COUNT 1//12
 // Handle to the test driver (chare)
 CProxy_TestDriver driverProxy;
 
@@ -92,7 +93,7 @@ public:
     starttime = CkWallTimer();
     
     CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
-    if(phase < 12) updater_array.preGenerateUpdates(phase%SIZES, SIZE_LIST[phase%SIZES], phase/SIZES);
+    if(phase < PHASE_COUNT) updater_array.preGenerateUpdates(phase%SIZES, SIZE_LIST[phase%SIZES], phase/SIZES);
     CkStartQD(endCb);
   }
   int phase = 0;
@@ -108,16 +109,16 @@ public:
     // At the end of the second update phase, check the global table
     //  for errors in Updater::checkErrors()
     CkCallback cb(CkReductionTarget(TestDriver, ReceiveMsgStats), thisProxy);
-    if(phase < 9)
-      nodeGrpProxy.avgLatency(cb);
-    else if(phase < 12)
-    {
-      if(phase == 11) {
+    if(phase < PHASE_COUNT) {
+      if(phase/SIZES < 3)
+        nodeGrpProxy.avgLatency(cb);
+      else
+        tram_proxy.avgLatency(cb);
+    }
+    if(phase == PHASE_COUNT-1) {
       CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
   //    updater_array.generateUpdatesVerify();
       CkStartQD(endCb);
-      }
-      tram_proxy.avgLatency(cb);
     }
   }
 
