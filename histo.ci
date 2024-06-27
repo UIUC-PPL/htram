@@ -28,6 +28,7 @@ mainmodule histo {
     entry TestDriver (CkArgMsg *args);
     entry [reductiontarget] void start();
     entry [reductiontarget] void startVerificationPhase();
+//    entry [reductiontarget] void startRunningPhase();
     entry [reductiontarget] void reportErrors(CmiInt8 globalNumErrors);
     entry [reductiontarget] void ReceiveMsgStats(double stats[n], int n);
   };
@@ -36,7 +37,7 @@ mainmodule histo {
     entry Updater();
     // This method generates keys that index into the global table.
     // Each generated key is submitted to the communication library
-    entry void preGenerateUpdates(bool use_src_grp, bool use_arc_agg, bool use_per_destpe);
+    entry void preGenerateUpdates(int buf_type, int buf_size, int ty);
     entry [threaded,reductiontarget] void generateUpdates();
     entry [threaded] void generateUpdatesVerify();
     entry void insertData(const CmiUInt8 &key);

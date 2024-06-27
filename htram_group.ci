@@ -5,9 +5,25 @@ module htram_group{
   initnode void registerMsgStatsCollection(void);
   message HTramMessage {
     itemT *buffer;
+    double *timer;
+    int *index;
+    int do_timer;
     int next; 
   };
-
+  message HTramMessageSmall {
+    itemT *buffer;
+    double *timer;
+    int *index;
+    int do_timer;
+    int next;
+  };
+  message HTramMessageLarge {
+    itemT *buffer;
+    double *timer;
+    int *index;
+    int do_timer;
+    int next;
+  };
   message HTramLocalMessage {
     itemT *buffer;
     int next;
@@ -28,7 +44,9 @@ module htram_group{
 //#ifdef SRC_GROUPING
     entry void receivePerPE(HTramMessage*);
 //#elif defined PER_DESTPE_BUFFER
-    entry void receiveOnPE(HTramMessage* msg);
+    entry [expedited] void receiveOnPE(HTramMessage* msg);
+    entry [expedited] void receiveOnPESmall(HTramMessageSmall* msg);
+    entry [expedited] void receiveOnPELarge(HTramMessageLarge* msg);
 //#else
     entry void receivePerPE(HTramNodeMessage*);
 //#endif
@@ -43,7 +61,12 @@ module htram_group{
     entry HTramRecv();
 //#ifndef PER_DESTPE_BUFFER
     entry [expedited] void receive(HTramMessage*);
+    entry [expedited] void receiveSmall(HTramMessageSmall*);
+    entry [expedited] void receiveLarge(HTramMessageLarge*);
+//    entry [expedited] void receive(HTramMessage*);
     entry void receive_no_sort(HTramMessage*);
+    entry void receive_no_sortSmall(HTramMessageSmall*);
+    entry void receive_no_sortLarge(HTramMessageLarge*);
 //#ifdef LOCAL_BUF
     entry void receive_small(HTramLocalMessage*);
     entry void avgLatency(CkCallback cb);

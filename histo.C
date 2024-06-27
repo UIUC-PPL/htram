@@ -5,6 +5,7 @@ typedef CmiUInt8 dtype;
 #include "histo.decl.h"
 
 #include <assert.h>
+#define SIZES 3
 // Handle to the test driver (chare)
 CProxy_TestDriver driverProxy;
 
@@ -89,31 +90,39 @@ public:
 
   void start() {
     starttime = CkWallTimer();
+    
     CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
-    updater_array.preGenerateUpdates(false, false, false);
+    if(phase < 12) updater_array.preGenerateUpdates(phase%SIZES, SIZE_LIST[phase%SIZES], phase/SIZES);
     CkStartQD(endCb);
   }
   int phase = 0;
   double update_walltime;
+
+//#define VERIFY
   void startVerificationPhase() {
     update_walltime = CkWallTimer() - starttime;
+    
 //    CkPrintf("   %8.3lf seconds\n", update_walltime);
-
+    
     // Repeat the update process to verify
     // At the end of the second update phase, check the global table
     //  for errors in Updater::checkErrors()
     CkCallback cb(CkReductionTarget(TestDriver, ReceiveMsgStats), thisProxy);
-    if(++phase == 4) {
-      tram_proxy.avgLatency(cb);
-      CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
-//      updater_array.generateUpdatesVerify();
-      CkStartQD(endCb);
-    } else {
+    if(phase < 9)
       nodeGrpProxy.avgLatency(cb);
+    else if(phase < 12)
+    {
+      if(phase == 11) {
+      CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
+  //    updater_array.generateUpdatesVerify();
+      CkStartQD(endCb);
+      }
+      tram_proxy.avgLatency(cb);
     }
   }
 
   void ReceiveMsgStats(double* stats, int n) {
+    tram_t* tram = tram_proxy.ckLocalBranch();
    // for(int i=0;i<n;i++)
    // CkPrintf("\nStats[%d] = %lf",i, stats[i]);
     char* code[4];
@@ -121,27 +130,25 @@ public:
     code[1] = "PsN";
     code[2] = "NNs";
     code[3] = "PP";
- 
-    CkPrintf("\n***data: %s, %8.3lfs, %lfs, %lfs, %lfs, %lf", code[phase-1], update_walltime, stats[TOTAL_LATENCY]/CkNumPes(), stats[MAX_LATENCY], stats[MIN_LATENCY], stats[TOTAL_MSGS]);
-    if(phase < 4) {
-      starttime = CkWallTimer();
-      CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
-      bool src_grp = false;
-      bool src_agg = false;
-      bool no_agg = false;
-      if(phase==1) src_grp = true;
-      if(phase==2) src_agg = true;
-      if(phase==3) no_agg = true;
-      updater_array.preGenerateUpdates(src_grp, src_agg, no_agg);
+    CkPrintf("\n***data:[%d] %s, %d, %8.3lf s, %lf s, %lf s, %lf s, %lf", phase, code[phase/3], tram->bufSize, update_walltime, stats[TOTAL_LATENCY]/CkNumPes(), stats[MAX_LATENCY], stats[MIN_LATENCY], stats[TOTAL_MSGS]);
+    phase++;
+#ifdef VERIFY
+    CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
+      updater_array.generateUpdatesVerify();
       CkStartQD(endCb);
-    }
+#else
+    start();
+#endif
   }
 
   void reportErrors(CmiInt8 globalNumErrors) {
     CkPrintf("Found %" PRId64 " errors in %" PRId64 " locations (%s).\n", globalNumErrors,
              lnum_counts*CkNumPes(), globalNumErrors == 0 ?
              "passed" : "failed");
+    start();
+#ifndef VERIFY
     CkExit();
+#endif
   }
 };
 
@@ -204,12 +211,10 @@ public:
     }
   }
 
-  void preGenerateUpdates(bool use_src_grp, bool use_arc_agg, bool use_per_destpe) {
+  void preGenerateUpdates(int buf_type, int buf_size, int agtype) {
     tram_t* tram = tram_proxy.ckLocalBranch();
     tram->set_func_ptr(Updater::insertDataCaller, this);
-    if(use_src_grp) tram->set_src_grp();
-    else if(use_arc_agg) tram->set_src_agg();
-    else if(use_per_destpe) tram->set_per_destpe();
+    tram->reset_stats(buf_type, buf_size, agtype);
 #ifdef RETURN_ITEMLIST
     tram->set_func_ptr_retarr(Updater::insertDataArrCaller, this);
 #endif
