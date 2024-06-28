@@ -47,7 +47,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
   ret_list = !ret_item;
 
   myPE = CkMyPe();
-  msgBuffers = new HTramMessage*[CkNumPes()];
+  msgBuffers = (BaseMsg **)(new HTramMessage*[CkNumPes()]);
 
   localMsgBuffer = new HTramMessage();
 
@@ -131,7 +131,7 @@ HTram::HTram(CkGroupID cgid, CkCallback ecb){
   myPE = CkMyPe();
   localMsgBuffer = new HTramMessage();
 #ifndef NODE_SRC_BUFFER
-  msgBuffers = new HTramMessage*[CkNumNodes()];
+  msgBuffers = (BaseMsg **)new HTramMessage*[CkNumNodes()];
   for(int i=0;i<CkNumNodes();i++)
     msgBuffers[i] = new HTramMessage();
 #endif
@@ -214,30 +214,30 @@ void HTram::insertValue(datatype value, int dest_pe) {
       if(agg == PP) {
 //        CkPrintf("\nmsg size = %d", *destMsg->getNext());
         if(buf_type == 0)
-            thisProxy[dest_pe].receiveOnPE(destMsg);
+            thisProxy[dest_pe].receiveOnPE((HTramMessage*)destMsg);
           else if(buf_type == 1)
-            thisProxy[dest_pe].receiveOnPESmall(destMsg);
+            thisProxy[dest_pe].receiveOnPESmall((HTramMessageSmall*)destMsg);
           else if(buf_type == 2)
-            thisProxy[dest_pe].receiveOnPELarge(destMsg);
+            thisProxy[dest_pe].receiveOnPELarge((HTramMessageLarge*)destMsg);
       } else {
           dest_idx = destNode;
         if(agg == PsN) {
           if(buf_type == 0)
-            nodeGrpProxy[destNode].receive_no_sort(destMsg);
+            nodeGrpProxy[destNode].receive_no_sort((HTramMessage*)destMsg);
           else if(buf_type == 1)
-            nodeGrpProxy[destNode].receive_no_sortSmall(destMsg);
+            nodeGrpProxy[destNode].receive_no_sortSmall((HTramMessageSmall*)destMsg);
           else if(buf_type == 2)
-            nodeGrpProxy[destNode].receive_no_sortLarge(destMsg);
+            nodeGrpProxy[destNode].receive_no_sortLarge((HTramMessageLarge*)destMsg);
 //          nodeGrpProxy[destNode].receive_no_sort(destMsg);
         } else {
 //          if(request) CkPrintf("\nSending msg from requesting htram");
 //          else CkPrintf("\nSending msg from responding htram");
           if(buf_type == 0)
-            nodeGrpProxy[destNode].receive(destMsg);
+            nodeGrpProxy[destNode].receive((HTramMessage*)destMsg);
           else if(buf_type == 1)
-            nodeGrpProxy[destNode].receiveSmall(destMsg);
+            nodeGrpProxy[destNode].receiveSmall((HTramMessageSmall*)destMsg);
           else if(buf_type == 2)
-            nodeGrpProxy[destNode].receiveLarge(destMsg);
+            nodeGrpProxy[destNode].receiveLarge((HTramMessageLarge*)destMsg);
         }
       }
       if(buf_type == 0)
@@ -278,13 +278,13 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
     *(srcNodeGrp->msgBuffers[destnode]->getNext()) = bufSize;
     
     if(buf_type == 0) {
-      nodeGrpProxy[destnode].receive(srcNodeGrp->msgBuffers[destnode]);
+      nodeGrpProxy[destnode].receive((HTramMessage*)srcNodeGrp->msgBuffers[destnode]);
       srcNodeGrp->msgBuffers[destnode] = new HTramMessage();
     } else if(buf_type == 1) {
-      nodeGrpProxy[destnode].receiveSmall(srcNodeGrp->msgBuffers[destnode]);
+      nodeGrpProxy[destnode].receiveSmall((HTramMessageSmall*)srcNodeGrp->msgBuffers[destnode]);
       srcNodeGrp->msgBuffers[destnode] = new HTramMessageSmall();
     } else if(buf_type == 2) {
-      nodeGrpProxy[destnode].receiveLarge(srcNodeGrp->msgBuffers[destnode]);
+      nodeGrpProxy[destnode].receiveLarge((HTramMessageLarge*)srcNodeGrp->msgBuffers[destnode]);
       srcNodeGrp->msgBuffers[destnode] = new HTramMessageLarge();
     }
     srcNodeGrp->done_count[destnode] = 0;
@@ -317,11 +317,11 @@ void HTram::tflush() {
   */
           *(srcNodeGrp->msgBuffers[i]->getDoTimer()) = 0;
           if(buf_type == 0)
-            nodeGrpProxy[i].receive(srcNodeGrp->msgBuffers[i]);
+            nodeGrpProxy[i].receive((HTramMessage*)srcNodeGrp->msgBuffers[i]);
           else if(buf_type == 1)
-            nodeGrpProxy[i].receiveSmall(srcNodeGrp->msgBuffers[i]);
+            nodeGrpProxy[i].receiveSmall((HTramMessageSmall*)srcNodeGrp->msgBuffers[i]);
           else if(buf_type == 2)
-            nodeGrpProxy[i].receiveLarge(srcNodeGrp->msgBuffers[i]);
+            nodeGrpProxy[i].receiveLarge((HTramMessageLarge*)srcNodeGrp->msgBuffers[i]);
         }
 //          srcNodeGrp->msgBuffers[i] = new HTramMessageSmall();//new HTramMessage();//localMsgBuffer;
           if((buf_type+1)%3 == 0)
@@ -357,24 +357,24 @@ void HTram::tflush() {
             destMsg->getIndex()[k] = sz;
             localBuffers[destNode*CkNodeSize(0)+k].clear();
           }
-          nodeGrpProxy[i].receive_no_sort(destMsg);
+          nodeGrpProxy[i].receive_no_sort((HTramMessage*)destMsg);
         }
         else if(agg == PNs) {
 //          nodeGrpProxy[i].receive(destMsg); //todo - Resize only upto next
           if(buf_type == 0)
-            nodeGrpProxy[i].receive(destMsg);
+            nodeGrpProxy[i].receive((HTramMessage*)destMsg);
           else if(buf_type == 1)
-            nodeGrpProxy[i].receiveSmall(destMsg);
+            nodeGrpProxy[i].receiveSmall((HTramMessageSmall*)destMsg);
           else if(buf_type == 2)
-            nodeGrpProxy[i].receiveLarge(destMsg);
+            nodeGrpProxy[i].receiveLarge((HTramMessageLarge*)destMsg);
         } else if(agg == PP) {
 //          CkPrintf("\nmsg size = %d", *destMsg->getNext());
           if(buf_type == 0)
-            thisProxy[i].receiveOnPE(destMsg);
+            thisProxy[i].receiveOnPE((HTramMessage*)destMsg);
           else if(buf_type == 1)
-            thisProxy[i].receiveOnPESmall(destMsg);
+            thisProxy[i].receiveOnPESmall((HTramMessageSmall*)destMsg);
           else if(buf_type == 2)
-            thisProxy[i].receiveOnPELarge(destMsg);
+            thisProxy[i].receiveOnPELarge((HTramMessageLarge*)destMsg);
         }
       }
 #if 0
@@ -395,7 +395,7 @@ void HTram::tflush() {
 }
 
 HTramNodeGrp::HTramNodeGrp() {
-  msgBuffers = new HTramMessage*[CkNumNodes()];
+  msgBuffers = (BaseMsg **)new HTramMessage*[CkNumNodes()];
   for(int i=0;i<CkNumNodes();i++) {
     msgBuffers[i] = new HTramMessage();
     get_idx[i] = 0;
