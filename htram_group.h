@@ -7,9 +7,9 @@
 #define ALL_BUF_TYPES
 #include "htram_group.decl.h"
 /* readonly */ extern CProxy_HTram tram_proxy;
-/* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
-/* readonly */ extern CProxy_HTramNodeGrp srcNodeGrpProxy;
-
+///* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
+///* readonly */ extern CProxy_HTramNodeGrp srcNodeGrpProxy;
+#include "packet.h"
 using namespace std;
 #define SIZE_LIST (int[]){1024, 512, 2048}
 #define BUFSIZE 1024
@@ -40,7 +40,9 @@ struct item {
 };
 
 //typedef std::pair<int,int> datatype;
-typedef int datatype;
+//typedef int datatype;
+
+typedef packet1 datatype;
 
 typedef item<datatype> itemT;
 
@@ -147,11 +149,14 @@ class HTram : public CBase_HTram {
     callback_function cb;
     callback_function_retarr cb_retarr;
     CkGroupID client_gid;
+    CProxy_HTramRecv nodeGrpProxy;
+    CProxy_HTramNodeGrp srcNodeGrpProxy;
     CkCallback endCb;
     CkCallback return_cb;
     int myPE, buf_type;
     int agg;
     bool ret_list;
+    bool request;
     double flush_time;
     double msg_stats[STATS_COUNT] {0.0};
     int local_idx[NODE_COUNT];
@@ -167,7 +172,7 @@ class HTram : public CBase_HTram {
     bool enable_flush;
     int bufSize;
     int prevBufSize;
-    HTram(CkGroupID gid, int buffer_size, bool enable_timed_flushing, double flush_timer, bool ret_item);
+    HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enable_timed_flushing, double flush_timer, bool ret_item, bool req, CkCallback start_cb);
     HTram(CkGroupID gid, CkCallback cb);
     HTram(CkMigrateMessage* msg);
     void set_func_ptr(void (*func)(void*, datatype), void*);
@@ -197,9 +202,11 @@ class HTramRecv : public CBase_HTramRecv {
   HTramRecv_SDAG_CODE
     CkCallback return_cb;
   public:
+    CProxy_HTram tram_proxy;
     double msg_stats[STATS_COUNT] {0.0};
     HTramRecv();
     HTramRecv(CkMigrateMessage* msg);
+    void setTramProxy(CkGroupID);
 //#ifndef PER_DESTPE_BUFFER
     void receive(HTramMessage*);
     void receiveSmall(HTramMessageSmall*);

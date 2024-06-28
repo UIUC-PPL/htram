@@ -1,10 +1,12 @@
 mainmodule smp_ig {
+  include "packet.h";
+
   extern module htram_group;
 
   // Handle to the test driver (chare)
   readonly CProxy_TestDriver               driverProxy;
   // Number of chares per PE
-  readonly int            l_num_ups;
+  readonly int            l_num_req;
   readonly int            lnum_counts;
 
   mainchare TestDriver {
@@ -23,7 +25,8 @@ mainmodule smp_ig {
     entry void preGenerateUpdates(int buf_type, int buf_size, int ty);
     entry [threaded,reductiontarget] void generateUpdates();
     entry [threaded] void generateUpdatesVerify();
-    entry void insertData(const CmiUInt8 &key);
+    entry void requestData(const packet1& key);
+    entry void responseData(const packet1& key);
     entry void insertData2(const CmiUInt8 &key);
     // Used for verification
     entry [reductiontarget] void checkErrors();

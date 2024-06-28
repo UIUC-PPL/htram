@@ -1,7 +1,7 @@
 module htram_group{
-  readonly CProxy_HTram tram_proxy;
-  readonly CProxy_HTramRecv nodeGrpProxy;
-  readonly CProxy_HTramNodeGrp srcNodeGrpProxy;
+//  readonly CProxy_HTram tram_proxy;
+//  readonly CProxy_HTramRecv nodeGrpProxy;
+//  readonly CProxy_HTramNodeGrp srcNodeGrpProxy;
   initnode void registerMsgStatsCollection(void);
   message HTramMessage {
     itemT *buffer;
@@ -37,7 +37,7 @@ module htram_group{
 //#define PER_DESTPE_BUFFER
 //#define LOCAL_BUF
   group HTram {
-    entry HTram(CkGroupID, int, bool, double, bool);
+    entry HTram(CkGroupID, CkGroupID, int, bool, double, bool, bool, CkCallback);
     entry HTram(CkGroupID gid, CkCallback cb);
     entry void avgLatency(CkCallback cb);
     entry void tflush();

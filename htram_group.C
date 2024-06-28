@@ -29,10 +29,11 @@ CkReductionMsg* msgStatsCollection(int nMsg, CkReductionMsg** rdmsgs) {
 
 void periodic_tflush(void *htram_obj, double time);
 
-HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, double time_in_ms, bool ret_item) {
+HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enable_buffer_flushing, double time_in_ms, bool ret_item, bool req, CkCallback start_cb) {
+  request = req;
   // TODO: Implement variable buffer sizes and timed buffer flushing
   flush_time = time_in_ms;
-  client_gid = cgid;
+//  client_gid = cgid;
   enable_flush = enable_buffer_flushing;
   msg_stats[MIN_LATENCY] = 100.0;
   buf_type = 0;
@@ -61,11 +62,22 @@ HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, doubl
     local_buf[i] = new HTramLocalMessage();
     local_idx[i] = 0;
   }
+
+  nodeGrpProxy = CProxy_HTramRecv(recv_ngid);
+  srcNodeGrpProxy = CProxy_HTramNodeGrp(src_ngid);
+
   srcNodeGrp = (HTramNodeGrp*)srcNodeGrpProxy.ckLocalBranch();
   nodeGrp = (HTramRecv*)nodeGrpProxy.ckLocalBranch();
 
+  CkGroupID my_gid = ckGetGroupID();
+//  CkPrintf("\nmy_gid = %d", my_gid);
+  if(thisIndex==0)
+  nodeGrp->setTramProxy(my_gid);
+
   if(enable_flush)
     periodic_tflush((void *) this, flush_time);
+
+  contribute(start_cb);
 }
 
 void HTram::reset_stats(int btype, int buf_size, int agtype) {
@@ -218,6 +230,8 @@ void HTram::insertValue(datatype value, int dest_pe) {
             nodeGrpProxy[destNode].receive_no_sortLarge(destMsg);
 //          nodeGrpProxy[destNode].receive_no_sort(destMsg);
         } else {
+//          if(request) CkPrintf("\nSending msg from requesting htram");
+//          else CkPrintf("\nSending msg from responding htram");
           if(buf_type == 0)
             nodeGrpProxy[destNode].receive(destMsg);
           else if(buf_type == 1)
@@ -761,6 +775,10 @@ void HTramRecv::receive_small(HTramLocalMessage* agg_message) {
     tram_proxy[i].receivePerPE(tmpMsg);
   }
   CkFreeMsg(sorted_agg_message);
+}
+
+void HTramRecv::setTramProxy(CkGroupID tram_gid) {
+  tram_proxy = CProxy_HTram(tram_gid);
 }
 
 
