@@ -14,6 +14,10 @@ histo_smp: histo.C histo.ci histo.decl.h histo.def.h libhtram_group.a
 	$(CHARMC_SMP) histo.ci -DTRAM_SMP -DGROUPBY
 	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY 
 
+smp_ig: smp_ig.C smp_ig.ci smp_ig.decl.h smp_ig.def.h libhtram_group.a
+	$(CHARMC_SMP) smp_ig.ci -DTRAM_SMP -DGROUPBY
+	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY 
+
 histo_nonSmp: histo.C histo.ci histo.decl.h histo.def.h libtramnonsmp.a
 	$(CHARMC) histo.ci -DTRAM_NON_SMP
 	$(CHARMC) $(CHARMCFLAGS) libtramnonsmp.a -language charm++ -o $@ $< -std=c++1z -DTRAM_NON_SMP
@@ -35,11 +39,17 @@ ig_nonSmp: ig_nonSmp.decl.h  ig_nonSmp.def.h tramNonSmp.decl.h libtramnonsmp.a
 
 histo.def.h histo.decl.h: histo.ci.stamp
 
+smp_ig.def.h smp_ig.decl.h: smp_ig.ci.stamp
+
 histo_g.def.h histo_g.decl.h: histo_g.ci.stamp
 
 histo_s.def.h histo_s.decl.h: histo_s.ci.stamp
 
 histo.ci.stamp: histo.ci
+	$(CHARMC_SMP) $(CHARMCFLAGS) $<
+	touch $@
+
+smp_ig.ci.stamp: smp_ig.ci
 	$(CHARMC_SMP) $(CHARMCFLAGS) $<
 	touch $@
 
