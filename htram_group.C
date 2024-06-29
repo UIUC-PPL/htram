@@ -45,7 +45,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
     if(thisIndex==0) CkPrintf("\nDest-node side grouping/sorting enabled (1 buffer per src-pe, per dest-node)\n");
 */
   ret_list = !ret_item;
-
+  agg = PNs;//PP;//NNs;
   myPE = CkMyPe();
   msgBuffers = (BaseMsg **)(new HTramMessage*[CkNumPes()]);
 
@@ -285,6 +285,7 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
       nodeGrpProxy[destnode].receiveSmall((HTramMessageSmall*)srcNodeGrp->msgBuffers[destnode]);
       srcNodeGrp->msgBuffers[destnode] = new HTramMessageSmall();
     } else if(buf_type == 2) {
+//      CkPrintf("\nSending msg of size = %d", ((HTramMessageLarge*)srcNodeGrp->msgBuffers[destnode])->next);
       nodeGrpProxy[destnode].receiveLarge((HTramMessageLarge*)srcNodeGrp->msgBuffers[destnode]);
       srcNodeGrp->msgBuffers[destnode] = new HTramMessageLarge();
     }
@@ -311,7 +312,7 @@ void HTram::tflush() {
         if(srcNodeGrp->done_count[i]) {
   //          CkPrintf("\nCalling TFLUSH---\n");
           *(srcNodeGrp->msgBuffers[i]->getNext()) = srcNodeGrp->done_count[i];
-  /*
+ /* 
           CkPrintf("\n[PE-%d]TF-Sending out data with size = %d", thisIndex, srcNodeGrp->msgBuffers[i]->next);
           for(int j=0;j<srcNodeGrp->msgBuffers[i]->next;j++)
             CkPrintf("\nTFvalue=%d, pe=%d", srcNodeGrp->msgBuffers[i]->buffer[j].payload, srcNodeGrp->msgBuffers[i]->buffer[j].destPe);
@@ -718,6 +719,8 @@ void HTramRecv::receiveLarge(HTramMessageLarge* agg_message) {
 
   for(int i=0;i<agg_message->next;i++) {
     int rank = agg_message->buffer[i].destPe - rank0PE;
+//    if(rank < 0 || rank > PPN_COUNT-1)
+//    CkPrintf("\nrank[%d/%d] = %d (%d - %d)", i, agg_message->next-1,rank, agg_message->buffer[i].destPe, rank0PE);
     sizes[rank]++;
   }
 

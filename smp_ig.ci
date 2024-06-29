@@ -22,7 +22,7 @@ mainmodule smp_ig {
     entry Updater(CkGroupID req_gid, CkGroupID resp_gid);
     // This method generates keys that index into the global table.
     // Each generated key is submitted to the communication library
-    entry void preGenerateUpdates(int buf_type, int buf_size, int ty, CkGroupID reqid, CkGroupID respid);
+    entry void preGenerateUpdates(int buf_type, int buf_size, int ty);
     entry [threaded,reductiontarget] void generateUpdates();
     entry [threaded] void generateUpdatesVerify();
     entry void requestData(const packet1& key);

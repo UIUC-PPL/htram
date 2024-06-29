@@ -40,27 +40,22 @@ public:
   TestDriver(CkArgMsg* args) {
     int64_t printhelp = 0;
     int opt;
-
-    while( (opt = getopt(args->argc, args->argv, "hen:T:S:t:")) != -1 ) {
+    while( (opt = getopt(args->argc, args->argv, "hn:T:S:t:")) != -1 ) {
       switch(opt) {
       case 'h': printhelp = 1; break;
-      case 'e': enable_buffer_flushing = true; break;
-      case 'n': sscanf(optarg,"%d" ,&l_num_req);  break;
-      case 'T': sscanf(optarg,"%d" ,&lnum_counts);  break;
+      case 'n': sscanf(optarg,"%d" ,&l_num_req);   break;
+      case 'T': sscanf(optarg,"%d" ,&ltab_siz);   break;
       case 'S': sscanf(optarg, "%d", &l_buffer_size); break;
       case 't': sscanf(optarg, "%d", &l_flush_timer); break;
       default:  break;
       }
     }
     assert(sizeof(CmiInt8) == sizeof(int64_t));
-    CkPrintf("Running histo on %d PEs\n", CkNumPes());
-    CkPrintf("Number updates / PE              (-n)= %d\n", l_num_req);
-    CkPrintf("Table size / PE                  (-T)= %d\n", lnum_counts);
-    CkPrintf("TRAM Buffer Size                 (-S)= %d\n", l_buffer_size);
-    if (enable_buffer_flushing) {
-      CkPrintf("TRAM Timed Flush enabled with flushes every %f us.\n", static_cast<double>(l_flush_timer)/1000);
-    }
-
+    CkPrintf("Running ig on %d PEs\n", CkNumPes());
+    CkPrintf("Number of Request / PE           (-n)= %ld\n", l_num_req );
+    CkPrintf("Table size / PE                  (-T)= %ld\n", ltab_siz);
+//    CkPrintf("TRAM Timed Flush enabled with flushes every %f us.\n", static_cast<double>(l_flush_timer)/1000);
+ 
     driverProxy = thishandle;
 
     int dims[2] = {CkNumNodes(), CkNumPes() / CkNumNodes()};
@@ -89,7 +84,7 @@ public:
       starttime = CkWallTimer();
     
       CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
-      if(phase < PHASE_COUNT) updater_array.preGenerateUpdates(phase%SIZES, SIZE_LIST[phase%SIZES], phase/SIZES, tram_req_proxy.ckGetGroupID(), tram_resp_proxy.ckGetGroupID());
+      if(phase < PHASE_COUNT) updater_array.preGenerateUpdates(phase%SIZES, SIZE_LIST[phase%SIZES], phase/SIZES);
       CkStartQD(endCb);
     }
   }
@@ -180,6 +175,7 @@ public:
     packet1 p2;
     p2.val = table[p.val];
     p2.idx = p.idx;
+    p2.pe = p.pe;
 //    CkPrintf("\nReceived request"); fflush(stdout);
     tram_resp->insertValue(p2, p.pe);
   }
@@ -203,10 +199,11 @@ public:
   }
 #endif
   
-  void preGenerateUpdates(int buf_type, int buf_size, int agtype, CkGroupID req_gid, CkGroupID resp_gid) {
+  void preGenerateUpdates(int buf_type, int buf_size, int agtype) {
     tram_req = tram_req_proxy.ckLocalBranch();
-    tram_req->set_func_ptr(Updater::requestDataCaller, this); //requestData
     tram_resp = tram_resp_proxy.ckLocalBranch();
+
+    tram_req->set_func_ptr(Updater::requestDataCaller, this); //requestData
     tram_resp->set_func_ptr(Updater::responseDataCaller, this);
 //    CkPrintf("\nDone w preGen");
     //respondWData
