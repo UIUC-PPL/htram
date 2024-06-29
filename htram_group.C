@@ -71,7 +71,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
 
   CkGroupID my_gid = ckGetGroupID();
 //  CkPrintf("\nmy_gid = %d", my_gid);
-  if(thisIndex==0)
+//  if(thisIndex==0)
   nodeGrp->setTramProxy(my_gid);
 
   if(enable_flush)
@@ -152,6 +152,7 @@ HTram::HTram(CkMigrateMessage* msg) {}
 //one per node, message, fixed 
 //Client inserts
 void HTram::insertValue(datatype value, int dest_pe) {
+//  CkPrintf("\nInserting on PE-%d", dest_pe);
   int destNode = dest_pe/CkNodeSize(0); //find safer way to find dest node,
   // node size is not always same
   
@@ -638,6 +639,7 @@ void HTramRecv::receiveSmall(HTramMessageSmall* agg_message) {
   CkFreeMsg(sorted_agg_message);
 }
 void HTramRecv::receive(HTramMessage* agg_message) {
+//  CkPrintf("\nReceived msg of size %d on node%d", agg_message->next, thisIndex);
   if(agg_message->do_timer) {
     double time_stamp = CkWallTimer();
     double latency[2];

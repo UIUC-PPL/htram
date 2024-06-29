@@ -23,12 +23,11 @@ bool return_item = true;
 using tram_proxy_t = CProxy_HTram;
 using tram_t = HTram;
 
-tram_proxy_t tram_req_proxy;
-tram_proxy_t tram_resp_proxy;
-
 class TestDriver : public CBase_TestDriver {
 private:
   CProxy_Updater  updater_array;
+  tram_proxy_t tram_req_proxy;
+  tram_proxy_t tram_resp_proxy;
 
   CProxy_HTramRecv nodeGrpReqProxy;
   CProxy_HTramNodeGrp srcNodeGrpReqProxy;
@@ -63,14 +62,9 @@ public:
     }
 
     driverProxy = thishandle;
-    updater_array = CProxy_Updater::ckNew();
 
     int dims[2] = {CkNumNodes(), CkNumPes() / CkNumNodes()};
     CkPrintf("Aggregation topology: %d %d\n", dims[0], dims[1]);
-
-    // Initialize TRAM with appropriate arguments
-    CkGroupID updater_array_gid;
-    updater_array_gid = updater_array.ckGetGroupID();
 
     nodeGrpReqProxy = CProxy_HTramRecv::ckNew();
     srcNodeGrpReqProxy = CProxy_HTramNodeGrp::ckNew();
@@ -81,17 +75,21 @@ public:
     CkCallback start_cb(CkReductionTarget(TestDriver, start), driverProxy);
     tram_req_proxy = tram_proxy_t::ckNew(nodeGrpReqProxy.ckGetGroupID(), srcNodeGrpReqProxy.ckGetGroupID(), l_buffer_size, enable_buffer_flushing, static_cast<double>(l_flush_timer)/1000, return_item, true, start_cb);
     tram_resp_proxy = tram_proxy_t::ckNew(nodeGrpRespProxy.ckGetGroupID(), srcNodeGrpRespProxy.ckGetGroupID(), l_buffer_size, enable_buffer_flushing, static_cast<double>(l_flush_timer)/1000, return_item, false, start_cb);
+
+    updater_array = CProxy_Updater::ckNew(tram_req_proxy.ckGetGroupID(), tram_resp_proxy.ckGetGroupID());
     
     delete args;
   }
 
   int count = 0;
   void start() {
-    if(++count == 2) {
+    if(++count == 3)
+    {
+      CkPrintf("\nStarting updates"); fflush(stdout);
       starttime = CkWallTimer();
     
       CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
-      if(phase < PHASE_COUNT) updater_array.preGenerateUpdates(phase%SIZES, SIZE_LIST[phase%SIZES], phase/SIZES);
+      if(phase < PHASE_COUNT) updater_array.preGenerateUpdates(phase%SIZES, SIZE_LIST[phase%SIZES], phase/SIZES, tram_req_proxy.ckGetGroupID(), tram_resp_proxy.ckGetGroupID());
       CkStartQD(endCb);
     }
   }
@@ -131,11 +129,15 @@ private:
   CmiInt8 *index;
   CmiInt8 *pckindx;
   CmiInt8 *tgt;
+  tram_proxy_t tram_req_proxy;
+  tram_proxy_t tram_resp_proxy;
   tram_t* tram_req;
   tram_t* tram_resp;
 
 public:
-  Updater() {
+  Updater(CkGroupID req_gid, CkGroupID resp_gid) {
+    tram_req_proxy = CProxy_HTram(req_gid);
+    tram_resp_proxy = CProxy_HTram(resp_gid);
     // Compute table start for this chare
     //globalStartmyProc = thisIndex * localTableSize;
     // CkPrintf("[PE%d] Update (thisIndex=%d) created: ltab_siz = %d, l_num_req =%d\n", CkMyPe(), thisIndex, ltab_siz, l_num_req);
@@ -178,6 +180,7 @@ public:
     packet1 p2;
     p2.val = table[p.val];
     p2.idx = p.idx;
+//    CkPrintf("\nReceived request"); fflush(stdout);
     tram_resp->insertValue(p2, p.pe);
   }
 
@@ -199,11 +202,13 @@ public:
     }
   }
 #endif
-  void preGenerateUpdates(int buf_type, int buf_size, int agtype) {
+  
+  void preGenerateUpdates(int buf_type, int buf_size, int agtype, CkGroupID req_gid, CkGroupID resp_gid) {
     tram_req = tram_req_proxy.ckLocalBranch();
     tram_req->set_func_ptr(Updater::requestDataCaller, this); //requestData
     tram_resp = tram_resp_proxy.ckLocalBranch();
     tram_resp->set_func_ptr(Updater::responseDataCaller, this);
+//    CkPrintf("\nDone w preGen");
     //respondWData
 //    tram->reset_stats(buf_type, buf_size, agtype);
 #if 0//def RETURN_ITEMLIST
@@ -233,6 +238,7 @@ public:
       if  ((i % 10000) == 9999) CthYield();
     }
     tram_req->tflush();
+//    CkPrintf("\nDone sending");
   }
 
   void generateUpdatesVerify() {
