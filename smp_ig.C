@@ -169,6 +169,8 @@ public:
   inline void insertData2(const CmiInt8& key) {
     counts[key]--;
   }
+  double local_timestamps[64];
+  double latency = 0.0;
 
   // Communication library calls this to deliver each randomly generated key
   inline void requestData(const packet1& p){//const CmiInt8& key) {
@@ -181,6 +183,7 @@ public:
   }
 
   inline void responseData(const packet1& p){//const CmiInt8& key) {
+    if(p.idx%128==0) latency += (CkWallTimer()-local_timestamps[p.idx/128]);
     tgt[p.idx] = p.val;
   }
 
@@ -228,6 +231,7 @@ public:
       p.val = col;
       p.idx = i;
       p.pe = CkMyPe();
+      if(i%128==0) local_timestamps[i/128] = CkWallTimer();
     //   thisProxy(pe).myRequest(p);
       tram_req->insertValue(p, pe);
 
@@ -235,7 +239,7 @@ public:
       if  ((i % 10000) == 9999) CthYield();
     }
     tram_req->tflush();
-//    CkPrintf("\nDone sending");
+    CkPrintf("\n[PE-%d] Done sending latency = %lf/8 = %lf/# of msgs\n", thisIndex, latency, latency/8);
   }
 
   void generateUpdatesVerify() {
