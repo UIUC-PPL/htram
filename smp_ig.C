@@ -80,7 +80,7 @@ public:
   void start() {
     if(++count == 3)
     {
-      CkPrintf("\nStarting updates"); fflush(stdout);
+//      CkPrintf("\nStarting updates"); fflush(stdout);
       starttime = CkWallTimer();
     
       CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
@@ -96,7 +96,16 @@ public:
     update_walltime = CkWallTimer() - starttime;
     
     CkPrintf("   %8.3lf seconds\n", update_walltime);
-    CkExit();
+    updater_array.getAvgLatency();
+    CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
+    //updater_array.generateUpdatesVerify();
+    CkStartQD(endCb);
+  }
+
+  void printLatency(double latency_sum) {
+//    CkPrintf("\nAvg latency = %lf/(%d*%d/128.0) = %lf s", latency_sum, l_num_req, CkNumPes(), latency_sum/((double)l_num_req*(double)CkNumPes()/128.0));
+    CkPrintf("\nAvg latency = %lf s", latency_sum/((double)l_num_req*(double)CkNumPes()/128.0));
+//    CkExit();
   }
 
   void ReceiveMsgStats(double* stats, int n) {
@@ -218,6 +227,11 @@ public:
     contribute(CkCallback(CkReductionTarget(Updater, generateUpdates), thisProxy));
   }
 
+  void getAvgLatency() {
+    CkCallback cb(CkReductionTarget(TestDriver, printLatency), driverProxy);
+    contribute(sizeof(double),&latency,CkReduction::sum_double, cb); 
+  }
+
   void generateUpdates() {
 
   // Generate this chare's share of global updates
@@ -239,7 +253,7 @@ public:
       if  ((i % 10000) == 9999) CthYield();
     }
     tram_req->tflush();
-    CkPrintf("\n[PE-%d] Done sending latency = %lf/8 = %lf/# of msgs\n", thisIndex, latency, latency/8);
+//    CkPrintf("\n[PE-%d] Done sending latency = %lf/8 = %lf/# of msgs\n", thisIndex, latency, latency/8);
   }
 
   void generateUpdatesVerify() {
@@ -258,15 +272,16 @@ public:
 
   void checkErrors() {
     CmiInt8 numErrors = 0;
-#if 0
-    for(CmiInt8 i = 0; i < lnum_counts; i++) {
-      if(counts[i] != 0L) {
+    for(CmiInt8 i=0; i<l_num_req; i++){
+      if(tgt[i] != (-1)*(index[i] + 1)){
         numErrors++;
-        if(numErrors < 5)  // print first five errors, report number of errors below
-          fprintf(stderr,"ERROR: Thread %d error at %ld (= %ld)\n", CkMyPe(), i, counts[i]);
+        if(numErrors < 5)  // print first five errors, report all the errors
+          fprintf(stderr,"ERROR: model %ld: Thread %d: tgt[%ld] = %ld != %ld)\n",
+                  0,  CkMyPe(), i, tgt[i], (-1)*(index[i] + 1));
+        //use_model,  MYTHREAD, i, tgt[i],(-1)*(i*THREADS+MYTHREAD + 1) );
       }
+      tgt[i] = 0;
     }
-#endif
     // Sum the errors observed across the entire system
     contribute(sizeof(CmiInt8), &numErrors, CkReduction::sum_long,
                CkCallback(CkReductionTarget(TestDriver, reportErrors),

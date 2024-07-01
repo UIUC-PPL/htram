@@ -16,6 +16,7 @@ mainmodule smp_ig {
 //    entry [reductiontarget] void startRunningPhase();
     entry [reductiontarget] void reportErrors(CmiInt8 globalNumErrors);
     entry [reductiontarget] void ReceiveMsgStats(double stats[n], int n);
+    entry [reductiontarget] void printLatency(double latency);
   };
 
   group Updater {
@@ -28,6 +29,7 @@ mainmodule smp_ig {
     entry void requestData(const packet1& key);
     entry void responseData(const packet1& key);
     entry void insertData2(const CmiUInt8 &key);
+    entry void getAvgLatency();
     // Used for verification
     entry [reductiontarget] void checkErrors();
   };
