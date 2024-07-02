@@ -150,6 +150,8 @@ private:
   tram_proxy_t tram_resp_proxy;
   tram_t* tram_req;
   tram_t* tram_resp;
+  double* local_timestamps;
+  double latency;
 
 public:
   Updater(CkGroupID req_gid, CkGroupID resp_gid) {
@@ -163,7 +165,9 @@ public:
     table = (CmiInt8*)malloc(sizeof(CmiInt8) * ltab_siz); assert(table != NULL);
     // Initialize
     for(CmiInt8 i = 0; i < ltab_siz; i++) {
-      table[i] = (-1)*(i*CkNumPes() + CkMyPe() + 1);
+      int index_k = thisIndex*ltab_siz + i;
+      table[i] = (-1)*(index_k + 1);
+      //CkPrintf("\n[PE-%d] table[%d = %d] = %d", thisIndex, i, index_k, table[i]);
     }
     index   =  (CmiInt8*)malloc(l_num_req * sizeof(CmiInt8)); assert(index != NULL);
     pckindx =  (CmiInt8*)malloc(l_num_req * sizeof(CmiInt8)); assert(pckindx != NULL);
@@ -175,13 +179,16 @@ public:
     for(CmiInt8 i = 0; i < l_num_req; i++){
       indx = rand() % tab_siz;
       index[i] = indx;
+//      if(index[i] < 0 || index[i] >= tab_siz) CkPrintf("\njunk");
+//      CkPrintf("\nPE[%d] index[%d] = %d", thisIndex, i, index[i]);
       lindx = indx / CkNumPes();      // the distributed version of indx
       pe  = indx % CkNumPes();
       pckindx[i] = (lindx << 16) | (pe & 0xffff); // same thing stored as (local index, thread) "shmem style"
     }
 
     tgt  =  (CmiInt8*)calloc(l_num_req, sizeof(CmiInt8)); assert(tgt != NULL);
-
+    local_timestamps = new double[l_num_req/128];
+    latency = 0.0;
     // Contribute to a reduction to signal the end of the setup phase
     contribute(CkCallback(CkReductionTarget(TestDriver, start), driverProxy));
   }
@@ -194,15 +201,15 @@ public:
   inline void insertData2(const CmiInt8& key) {
     counts[key]--;
   }
-  double local_timestamps[64];
-  double latency = 0.0;
 
   // Communication library calls this to deliver each randomly generated key
   inline void requestData(const packet1& p){//const CmiInt8& key) {
     packet1 p2;
     p2.val = table[p.val];
+    
     p2.idx = p.idx;
     p2.pe = p.pe;
+    //CkPrintf("\n[PE-%d]Responding with %d val for idx %d, the %dth request", thisIndex, p2.val, p.val, p2.idx);
 //    CkPrintf("\nReceived request"); fflush(stdout);
     tram_resp->insertValue(p2, p.pe);
   }
@@ -210,6 +217,7 @@ public:
   inline void responseData(const packet1& p){//const CmiInt8& key) {
     if(p.idx%128==0) latency += (CkWallTimer()-local_timestamps[p.idx/128]);
     tgt[p.idx] = p.val;
+    //CkPrintf("\n[PE-%d]Received value tgt[%d] =  %d", thisIndex, p.idx, p.val);
     //if(p.idx%256==255) tram_resp->tflush();
   }
 
@@ -269,11 +277,12 @@ public:
       p.pe = CkMyPe();
       if(i%128==0) local_timestamps[i/128] = CkWallTimer();
     //   thisProxy(pe).myRequest(p);
+      //CkPrintf("\n[PE-%d] request for index %d from pe %d, as %dth request", thisIndex, col, pe, i);
       tram_req->insertValue(p, pe);
 //      if(i%128==0) tram_req->tflush();
 
         // TODO: Test with something other than % or test with something equal to 2^n
-      if  ((i % 10000) == 9999) thisProxy[thisIndex].break_loop(i+1);// CthYield();
+      if  ((i % 10000) == 9999) CthYield();
     }
     tram_req->tflush();
 //    CkPrintf("\n[PE-%d] Done sending latency = %lf/8 = %lf/# of msgs\n", thisIndex, latency, latency/8);
@@ -296,11 +305,16 @@ public:
   void checkErrors() {
     CmiInt8 numErrors = 0;
     for(CmiInt8 i=0; i<l_num_req; i++){
-      if(tgt[i] != (-1)*(index[i] + 1)){
+      int index_k = index[i];
+      int l_indx =  index_k/CkNumPes();
+      int _pe = index_k%CkNumPes();
+      int index_i = _pe*ltab_siz + l_indx;
+//      CkPrintf("\nEndPE[%d] index[%d] = %d", thisIndex, i, index[i]);
+      if(tgt[i] != (-1*index_i)-1){
         numErrors++;
         if(numErrors < 5)  // print first five errors, report all the errors
-          fprintf(stderr,"ERROR: model %ld: Thread %d: tgt[%ld] = %ld != %ld)\n",
-                  0,  CkMyPe(), i, tgt[i], (-1)*(index[i] + 1));
+          fprintf(stderr,"ERROR: model %ld: Thread %d: tgt[%ld] = %ld != (idx=%d,%d) %ld)\n",
+                  0,  CkMyPe(), i, tgt[i],index[i],index_i, ((-1)*index_i)-1);
         //use_model,  MYTHREAD, i, tgt[i],(-1)*(i*THREADS+MYTHREAD + 1) );
       }
       tgt[i] = 0;

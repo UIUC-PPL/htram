@@ -45,7 +45,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
     if(thisIndex==0) CkPrintf("\nDest-node side grouping/sorting enabled (1 buffer per src-pe, per dest-node)\n");
 */
   ret_list = !ret_item;
-  agg = PNs;//NNs;//PP;//PNs;//PP;//NNs;
+  agg = PP;//NNs;//PNs;//NNs;//PP;//PNs;//PP;//NNs;
   myPE = CkMyPe();
   msgBuffers = (BaseMsg **)(new HTramMessage*[CkNumPes()]);
 
@@ -296,6 +296,7 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
 }
 
 void HTram::tflush() {
+//    CkPrintf("\nCalling flush on PE-%d", thisIndex); fflush(stdout);
   if(agg == NNs) {
 #if 1
     int flush_count = srcNodeGrp->flush_count.fetch_add(1, std::memory_order_seq_cst);
@@ -384,7 +385,7 @@ void HTram::tflush() {
             thisProxy[i].receiveOnPELarge((HTramMessageLarge*)destMsg);
         }
       }
-#if 1
+#if 0
         //msgBuffers[i] = new HTramMessageSmall();//new HTramMessage();
         if(buf_type == 0)
           msgBuffers[i] = new HTramMessage();
