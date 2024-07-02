@@ -84,6 +84,7 @@ public:
       starttime = CkWallTimer();
     
       CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
+//      CkCallback endCb(CkIndex_Updater::lastFlush(),updater_array);
       if(phase < PHASE_COUNT) updater_array.preGenerateUpdates(phase%SIZES, SIZE_LIST[phase%SIZES], phase/SIZES);
       CkStartQD(endCb);
     }
@@ -93,13 +94,25 @@ public:
 
 //#define VERIFY
   void startVerificationPhase() {
-    update_walltime = CkWallTimer() - starttime;
+//    update_walltime = CkWallTimer() - starttime;
     
+//    CkPrintf("   %8.3lf seconds\n", update_walltime);
+
+    //updater_array.getAvgLatency();
+    CkCallback endCb(CkIndex_TestDriver::completeRun(), thisProxy);
+   // CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
+    //updater_array.generateUpdatesVerify();
+    CkStartQD(endCb);
+    updater_array.lastFlush();
+  }
+
+  void completeRun() {
+    update_walltime = CkWallTimer() - starttime;
     CkPrintf("   %8.3lf seconds\n", update_walltime);
     updater_array.getAvgLatency();
     CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
-    //updater_array.generateUpdatesVerify();
     CkStartQD(endCb);
+
   }
 
   void printLatency(double latency_sum) {
@@ -174,6 +187,9 @@ public:
   }
 
   Updater(CkMigrateMessage *msg) {}
+  void lastFlush() {
+    tram_resp->tflush();
+  }
 
   inline void insertData2(const CmiInt8& key) {
     counts[key]--;
@@ -194,6 +210,7 @@ public:
   inline void responseData(const packet1& p){//const CmiInt8& key) {
     if(p.idx%128==0) latency += (CkWallTimer()-local_timestamps[p.idx/128]);
     tgt[p.idx] = p.val;
+    //if(p.idx%256==255) tram_resp->tflush();
   }
 
   static void requestDataCaller(void* p, packet1 key) {
@@ -223,8 +240,8 @@ public:
 #if 0//def RETURN_ITEMLIST
     tram->set_func_ptr_retarr(Updater::insertDataArrCaller, this);
 #endif
-
-    contribute(CkCallback(CkReductionTarget(Updater, generateUpdates), thisProxy));
+    int idx = 0;
+    contribute(sizeof(int), &idx, CkReduction::sum_int, CkCallback(CkReductionTarget(Updater, generateUpdates), thisProxy));
   }
 
   void getAvgLatency() {
@@ -232,14 +249,19 @@ public:
     contribute(sizeof(double),&latency,CkReduction::sum_double, cb); 
   }
 
-  void generateUpdates() {
+
+  void break_loop(int idx) {
+    thisProxy[thisIndex].generateUpdates(idx);
+  }
+
+  void generateUpdates(int idx) {
 
   // Generate this chare's share of global updates
     CmiInt8 pe, col;
 
     //CkPrintf("[%d] Hi from generateUpdates %d, l_num_req: %d\n", CkMyPe(),thisIndex, l_num_req);
     packet1 p;
-    for(CmiInt8 i = 0; i < l_num_req; i++){
+    for(CmiInt8 i = idx; i < l_num_req; i++){
       col = pckindx[i] >> 16;
       pe  = pckindx[i] & 0xffff;
       p.val = col;
@@ -248,9 +270,10 @@ public:
       if(i%128==0) local_timestamps[i/128] = CkWallTimer();
     //   thisProxy(pe).myRequest(p);
       tram_req->insertValue(p, pe);
+//      if(i%128==0) tram_req->tflush();
 
         // TODO: Test with something other than % or test with something equal to 2^n
-      if  ((i % 10000) == 9999) CthYield();
+      if  ((i % 10000) == 9999) thisProxy[thisIndex].break_loop(i+1);// CthYield();
     }
     tram_req->tflush();
 //    CkPrintf("\n[PE-%d] Done sending latency = %lf/8 = %lf/# of msgs\n", thisIndex, latency, latency/8);

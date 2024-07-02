@@ -13,6 +13,7 @@ mainmodule smp_ig {
     entry TestDriver (CkArgMsg *args);
     entry [reductiontarget] void start();
     entry [reductiontarget] void startVerificationPhase();
+    entry void completeRun();
 //    entry [reductiontarget] void startRunningPhase();
     entry [reductiontarget] void reportErrors(CmiInt8 globalNumErrors);
     entry [reductiontarget] void ReceiveMsgStats(double stats[n], int n);
@@ -24,8 +25,10 @@ mainmodule smp_ig {
     // This method generates keys that index into the global table.
     // Each generated key is submitted to the communication library
     entry void preGenerateUpdates(int buf_type, int buf_size, int ty);
-    entry [threaded,reductiontarget] void generateUpdates();
+    entry [reductiontarget] void generateUpdates(int idx);
     entry [threaded] void generateUpdatesVerify();
+    entry void break_loop(int idx);
+    entry void lastFlush();
     entry void requestData(const packet1& key);
     entry void responseData(const packet1& key);
     entry void insertData2(const CmiUInt8 &key);

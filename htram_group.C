@@ -45,7 +45,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
     if(thisIndex==0) CkPrintf("\nDest-node side grouping/sorting enabled (1 buffer per src-pe, per dest-node)\n");
 */
   ret_list = !ret_item;
-  agg = PP;//NNs;//PP;//PNs;//PP;//NNs;
+  agg = PNs;//NNs;//PP;//PNs;//PP;//NNs;
   myPE = CkMyPe();
   msgBuffers = (BaseMsg **)(new HTramMessage*[CkNumPes()]);
 
@@ -297,6 +297,7 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
 
 void HTram::tflush() {
   if(agg == NNs) {
+#if 1
     int flush_count = srcNodeGrp->flush_count.fetch_add(1, std::memory_order_seq_cst);
     //Send your local buffer
     for(int i=0;i<CkNumNodes();i++) {
@@ -339,6 +340,7 @@ void HTram::tflush() {
         
       }
     }
+#endif
   }
   else {
     int buf_count = CkNumNodes();
@@ -361,7 +363,9 @@ void HTram::tflush() {
           }
           nodeGrpProxy[i].receive_no_sort((HTramMessage*)destMsg);
         }
-        else if(agg == PNs) {
+        else if(agg == PNs)
+        {
+#if 1
 //          nodeGrpProxy[i].receive(destMsg); //todo - Resize only upto next
           if(buf_type == 0)
             nodeGrpProxy[i].receive((HTramMessage*)destMsg);
@@ -369,6 +373,7 @@ void HTram::tflush() {
             nodeGrpProxy[i].receiveSmall((HTramMessageSmall*)destMsg);
           else if(buf_type == 2)
             nodeGrpProxy[i].receiveLarge((HTramMessageLarge*)destMsg);
+#endif
         } else if(agg == PP) {
 //          CkPrintf("\nmsg size = %d", *destMsg->getNext());
           if(buf_type == 0)
@@ -379,13 +384,13 @@ void HTram::tflush() {
             thisProxy[i].receiveOnPELarge((HTramMessageLarge*)destMsg);
         }
       }
-#if 0
+#if 1
         //msgBuffers[i] = new HTramMessageSmall();//new HTramMessage();
-        if((buf_type+1)%3 == 0)
+        if(buf_type == 0)
           msgBuffers[i] = new HTramMessage();
-        else if((buf_type+1)%3 == 1)
+        else if(buf_type == 1)
           msgBuffers[i] = new HTramMessageSmall();
-        else if((buf_type+1)%3 == 2)
+        else if(buf_type == 2)
           msgBuffers[i] = new HTramMessageLarge();
 #endif      
     }
