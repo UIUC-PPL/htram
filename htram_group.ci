@@ -25,6 +25,7 @@ module htram_group{
     entry HTram(CkGroupID gid, CkCallback cb);
     entry void avgLatency(CkCallback cb);
     entry void tflush();
+    entry [whenidle] bool idleFlush();
 //#ifdef SRC_GROUPING
     entry void receivePerPE(HTramMessage*);
 //#elif defined PER_DESTPE_BUFFER

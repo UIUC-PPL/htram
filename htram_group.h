@@ -5,6 +5,10 @@
 //#define NODE_SRC_BUFFER
 //#define LOCAL_BUF
 #define ALL_BUF_TYPES
+#define IDLE_FLUSH
+#ifdef IDLE_FLUSH
+#define PARTIAL_FLUSH 0.2
+#endif
 #include "htram_group.decl.h"
 /* readonly */ extern CProxy_HTram tram_proxy;
 /* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
@@ -117,7 +121,8 @@ class HTram : public CBase_HTram {
     void set_src_grp();
     void set_src_agg();
     void set_per_destpe();
-    void tflush();
+    void tflush(bool idleflush=false);
+    bool idleFlush();
     void avgLatency(CkCallback cb);
 //#ifdef SRC_GROUPING
     void receivePerPE(HTramMessage *);

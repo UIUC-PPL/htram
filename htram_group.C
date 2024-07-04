@@ -66,6 +66,14 @@ HTram::HTram(CkGroupID cgid, int buffer_size, bool enable_buffer_flushing, doubl
 
   if(enable_flush)
     periodic_tflush((void *) this, flush_time);
+#ifdef IDLE_FLUSH
+  CkCallWhenIdle(CkIndex_HTram::idleFlush(), this);
+#endif
+}
+
+bool HTram::idleFlush() {
+  tflush(true);
+  return true;
 }
 
 void HTram::set_src_grp(){
@@ -255,7 +263,7 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
   local_idx[destnode] = 0;
 }
 
-void HTram::tflush() {
+void HTram::tflush(bool idleflush) {
   if(use_src_agg) {
     int flush_count = srcNodeGrp->flush_count.fetch_add(1, std::memory_order_seq_cst);
     //Send your local buffer
@@ -293,8 +301,13 @@ void HTram::tflush() {
     if(use_per_destpe_agg) buf_count = CkNumPes();
 
     for(int i=0;i<buf_count;i++) {
-      if(msgBuffers[i]->next)
+#ifdef IDLE_FLUSH
+      if(!idleflush || msgBuffers[i]->next > BUFSIZE*PARTIAL_FLUSH)
+#else
+      if(!idleflush && msgBuffers[i]->next)
+#endif
       {
+        //if(idleflush) CkPrintf("\nidle flush on pe%d buf %d at size %d", CkMyPe(), i, msgBuffers[i]->next);
         HTramMessage *destMsg = msgBuffers[i];
         destMsg->do_timer = 0;
         if(use_src_grouping) {

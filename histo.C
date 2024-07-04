@@ -103,7 +103,7 @@ public:
     // At the end of the second update phase, check the global table
     //  for errors in Updater::checkErrors()
     CkCallback cb(CkReductionTarget(TestDriver, ReceiveMsgStats), thisProxy);
-    if(++phase == 4) {
+    if(++phase == 1) {
       tram_proxy.avgLatency(cb);
       CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
 //      updater_array.generateUpdatesVerify();
@@ -123,7 +123,7 @@ public:
     code[3] = "PP";
  
     CkPrintf("\n***data: %s, %8.3lfs, %lfs, %lfs, %lfs, %lf", code[phase-1], update_walltime, stats[TOTAL_LATENCY]/CkNumPes(), stats[MAX_LATENCY], stats[MIN_LATENCY], stats[TOTAL_MSGS]);
-    if(phase < 4) {
+    if(phase < 1) {
       starttime = CkWallTimer();
       CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
       bool src_grp = false;
