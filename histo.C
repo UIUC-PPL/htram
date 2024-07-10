@@ -38,11 +38,11 @@ using tram_proxy_t = CProxy_tramNonSmp<int>;
 using tram_t = tramNonSmp<int>;
 #endif
 
-/* readonly */ tram_proxy_t tram_proxy;
 
 class TestDriver : public CBase_TestDriver {
 private:
   CProxy_Updater  updater_array;
+  tram_proxy_t tram_proxy;
   double starttime;
 
 public:
@@ -71,30 +71,36 @@ public:
     }
 
     driverProxy = thishandle;
-    updater_array = CProxy_Updater::ckNew();
+//    updater_array = CProxy_Updater::ckNew();
 
     int dims[2] = {CkNumNodes(), CkNumPes() / CkNumNodes()};
     CkPrintf("Aggregation topology: %d %d\n", dims[0], dims[1]);
 
     // Initialize TRAM with appropriate arguments
-    CkGroupID updater_array_gid;
-    updater_array_gid = updater_array.ckGetGroupID();
+//    CkGroupID updater_array_gid;
+//    updater_array_gid = updater_array.ckGetGroupID();
 
 #ifdef TRAM_SMP
     nodeGrpProxy = CProxy_HTramRecv::ckNew();
     srcNodeGrpProxy = CProxy_HTramNodeGrp::ckNew();
 #endif
-    tram_proxy = tram_proxy_t::ckNew(updater_array_gid, l_buffer_size, enable_buffer_flushing, static_cast<double>(l_flush_timer)/1000, return_item);
-
+    CkCallback start_cb(CkReductionTarget(TestDriver, start), driverProxy);
+    tram_proxy = tram_proxy_t::ckNew(nodeGrpProxy.ckGetGroupID(), srcNodeGrpProxy.ckGetGroupID(), l_buffer_size, enable_buffer_flushing, static_cast<double>(l_flush_timer)/1000, return_item,true, start_cb);
+    updater_array = CProxy_Updater::ckNew(tram_proxy.ckGetGroupID(), 42);
     delete args;
   }
 
+  int count = 0;
   void start() {
-    starttime = CkWallTimer();
-    
-    CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
-    if(phase < PHASE_COUNT) updater_array.preGenerateUpdates(phase%SIZES, SIZE_LIST[phase%SIZES], phase/SIZES);
-    CkStartQD(endCb);
+    count++;
+    if(count == 2) {
+      updater_array.preGenerateUpdates();
+    } else if(count == 3) {
+      starttime = CkWallTimer();
+      CkCallback endCb(CkIndex_TestDriver::startVerificationPhase(), thisProxy);
+      updater_array.generateUpdates();
+      CkStartQD(endCb);
+    }
   }
   int phase = 0;
   double update_walltime;
@@ -103,50 +109,18 @@ public:
   void startVerificationPhase() {
     update_walltime = CkWallTimer() - starttime;
     
-//    CkPrintf("   %8.3lf seconds\n", update_walltime);
-    
-    // Repeat the update process to verify
-    // At the end of the second update phase, check the global table
-    //  for errors in Updater::checkErrors()
-    CkCallback cb(CkReductionTarget(TestDriver, ReceiveMsgStats), thisProxy);
-    if(phase < PHASE_COUNT) {
-      if(phase/SIZES < 3)
-        nodeGrpProxy.avgLatency(cb);
-      else
-        tram_proxy.avgLatency(cb);
-    }
-    if(phase == PHASE_COUNT-1) {
+    CkPrintf("   %8.3lf seconds\n", update_walltime);
       CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
-  //    updater_array.generateUpdatesVerify();
+//      updater_array.generateUpdatesVerify();
       CkStartQD(endCb);
-    }
   }
 
-  void ReceiveMsgStats(double* stats, int n) {
-    tram_t* tram = tram_proxy.ckLocalBranch();
-   // for(int i=0;i<n;i++)
-   // CkPrintf("\nStats[%d] = %lf",i, stats[i]);
-    char* code[4];
-    code[0] = "PNs";
-    code[1] = "PsN";
-    code[2] = "NNs";
-    code[3] = "PP";
-    CkPrintf("\n***data:[%d] %s, %d, %8.3lf s, %lf s, %lf s, %lf s, %lf", phase, code[phase/3], tram->bufSize, update_walltime, stats[TOTAL_LATENCY]/CkNumPes(), stats[MAX_LATENCY], stats[MIN_LATENCY], stats[TOTAL_MSGS]);
-    phase++;
-#ifdef VERIFY
-    CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
-      updater_array.generateUpdatesVerify();
-      CkStartQD(endCb);
-#else
-    start();
-#endif
-  }
 
   void reportErrors(CmiInt8 globalNumErrors) {
     CkPrintf("Found %" PRId64 " errors in %" PRId64 " locations (%s).\n", globalNumErrors,
              lnum_counts*CkNumPes(), globalNumErrors == 0 ?
              "passed" : "failed");
-    start();
+//    start();
 #ifndef VERIFY
     CkExit();
 #endif
@@ -162,8 +136,15 @@ private:
   CmiInt8 *counts;
   CmiInt8 *index;
   CmiInt8 *pckindx;
+  CmiInt8 num_counts;
+  tram_proxy_t tram_proxy;
+  tram_t* tram;
+  int count;
 public:
-  Updater() {
+  Updater(CkGroupID tram_id, int k) {
+    count = 0;
+    tram_proxy = CProxy_HTram(tram_id);
+  
     // Compute table start for this chare
     // CkPrintf("[PE%d] Update (thisIndex=%d) created: lnum_counts = %d, l_num_ups =%d\n", CkMyPe(), thisIndex, lnum_counts, l_num_ups);
 
@@ -177,7 +158,7 @@ public:
     index = (CmiInt8 *) malloc(l_num_ups * sizeof(CmiInt8)); assert(index != NULL);
     pckindx = (CmiInt8 *) malloc(l_num_ups * sizeof(CmiInt8)); assert(pckindx != NULL);
   
-    CmiInt8 num_counts = lnum_counts * CkNumPes();
+    num_counts = lnum_counts * CkNumPes();
     CmiInt8 indx, lindx, pe;
     for(CmiInt8 i = 0; i < l_num_ups; i++) {
       //indx = i % num_counts;          //might want to do this for debugging
@@ -196,6 +177,14 @@ public:
   // Communication library calls this to deliver each randomly generated key
   inline void insertData(const CmiInt8& key) {
     counts[key]++;
+#if 0
+    CmiInt8 indx = rand() % num_counts;
+    CmiInt8 lindx = indx / CkNumPes();
+    CmiInt8 pe  = indx % CkNumPes();
+
+    if(++count < l_num_ups*8) tram->insertValue(lindx, pe);
+    if(count%l_num_ups==0) tram->tflush();
+#endif
   }
 
   inline void insertData2(const CmiInt8& key) {
@@ -212,21 +201,21 @@ public:
     }
   }
 
-  void preGenerateUpdates(int buf_type, int buf_size, int agtype) {
-    tram_t* tram = tram_proxy.ckLocalBranch();
+  void preGenerateUpdates() {
+    tram = tram_proxy.ckLocalBranch();
     tram->set_func_ptr(Updater::insertDataCaller, this);
-    tram->reset_stats(buf_type, buf_size, agtype);
+//    tram->reset_stats(buf_type, buf_size, agtype);
 #ifdef RETURN_ITEMLIST
     tram->set_func_ptr_retarr(Updater::insertDataArrCaller, this);
 #endif
 
-    contribute(CkCallback(CkReductionTarget(Updater, generateUpdates), thisProxy));
+    contribute(CkCallback(CkReductionTarget(TestDriver, start), driverProxy));
+    //contribute(CkCallback(CkReductionTarget(Updater, generateUpdates), thisProxy));
   }
 
   void generateUpdates() {
     // Generate this chare's share of global updates
     CmiInt8 pe, col;
-    tram_t* tram = tram_proxy.ckLocalBranch();
 
     for(CmiInt8 i = 0; i < l_num_ups; i++) {
       col = pckindx[i] >> 16;
@@ -234,7 +223,7 @@ public:
       // Submit generated key to chare owning that portion of the table
       tram->insertValue(col, pe);
 
-      if  ((i % 8192) == 8191) CthYield();
+      if  ((i % 2048) == 2047) CthYield();
     }
     tram->tflush();
   }
@@ -263,6 +252,12 @@ public:
           fprintf(stderr,"ERROR: Thread %d error at %ld (= %ld)\n", CkMyPe(), i, counts[i]);
       }
     }
+#endif
+#if 0
+    int flush_count = tram->flush_msg_count;
+    int agg_count = tram->agg_msg_count;
+    if(flush_count || agg_count)
+      CkPrintf("\nPE-%d, msg count = %d(agg), %d(flush), data sent = %d", thisIndex, agg_count, flush_count, count);
 #endif
     // Sum the errors observed across the entire system
     contribute(sizeof(CmiInt8), &numErrors, CkReduction::sum_long,

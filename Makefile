@@ -12,11 +12,12 @@ include Makefile_htram
 
 histo_smp: histo.C histo.ci histo.decl.h histo.def.h libhtram_group.a
 	$(CHARMC_SMP) histo.ci -DTRAM_SMP -DGROUPBY
-	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY 
+	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY
 
 smp_ig: smp_ig.C smp_ig.ci smp_ig.decl.h smp_ig.def.h libhtram_group.a
 	$(CHARMC_SMP) smp_ig.ci -DTRAM_SMP -DGROUPBY
-	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY 
+	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY
+# -tracemode projections
 
 histo_nonSmp: histo.C histo.ci histo.decl.h histo.def.h libtramnonsmp.a
 	$(CHARMC) histo.ci -DTRAM_NON_SMP

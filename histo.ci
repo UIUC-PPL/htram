@@ -1,22 +1,5 @@
 mainmodule histo {
-#ifdef TRAM_NON_SMP
-  extern module tramNonSmp;
-  group tramNonSmp<int>;
-  message tramNonSmpMsg<int>;
-
-  readonly CProxy_tramNonSmp<int> tram_proxy;
-
-#elif TRAM_SMP
-
-#if GROUPBY
   extern module htram_group;
-#elif SORTBY
-  extern module htram_sort;
-#else
-  extern module htram;
-#endif
-
-#endif
 
   // Handle to the test driver (chare)
   readonly CProxy_TestDriver               driverProxy;
@@ -30,15 +13,14 @@ mainmodule histo {
     entry [reductiontarget] void startVerificationPhase();
 //    entry [reductiontarget] void startRunningPhase();
     entry [reductiontarget] void reportErrors(CmiInt8 globalNumErrors);
-    entry [reductiontarget] void ReceiveMsgStats(double stats[n], int n);
   };
 
   group Updater {
-    entry Updater();
+    entry Updater(CkGroupID, int);
     // This method generates keys that index into the global table.
     // Each generated key is submitted to the communication library
-    entry void preGenerateUpdates(int buf_type, int buf_size, int ty);
-    entry [threaded,reductiontarget] void generateUpdates();
+    entry void preGenerateUpdates();
+    entry [threaded] void generateUpdates();
     entry [threaded] void generateUpdatesVerify();
     entry void insertData(const CmiUInt8 &key);
     entry void insertData2(const CmiUInt8 &key);

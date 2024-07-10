@@ -152,11 +152,13 @@ private:
   tram_t* tram_resp;
   double* local_timestamps;
   double latency;
+  CmiInt8 *count;
 
 public:
   Updater(CkGroupID req_gid, CkGroupID resp_gid) {
     tram_req_proxy = CProxy_HTram(req_gid);
     tram_resp_proxy = CProxy_HTram(resp_gid);
+    count = (CmiInt8*)malloc(l_num_req * sizeof(CmiInt8));
     // Compute table start for this chare
     //globalStartmyProc = thisIndex * localTableSize;
     // CkPrintf("[PE%d] Update (thisIndex=%d) created: ltab_siz = %d, l_num_req =%d\n", CkMyPe(), thisIndex, ltab_siz, l_num_req);
@@ -179,6 +181,7 @@ public:
     for(CmiInt8 i = 0; i < l_num_req; i++){
       indx = rand() % tab_siz;
       index[i] = indx;
+      count[i] = 0;
 //      if(index[i] < 0 || index[i] >= tab_siz) CkPrintf("\njunk");
 //      CkPrintf("\nPE[%d] index[%d] = %d", thisIndex, i, index[i]);
       lindx = indx / CkNumPes();      // the distributed version of indx
@@ -187,7 +190,7 @@ public:
     }
 
     tgt  =  (CmiInt8*)calloc(l_num_req, sizeof(CmiInt8)); assert(tgt != NULL);
-    local_timestamps = new double[l_num_req/128];
+    local_timestamps = new double[4+ l_num_req/128];
     latency = 0.0;
     // Contribute to a reduction to signal the end of the setup phase
     contribute(CkCallback(CkReductionTarget(TestDriver, start), driverProxy));
@@ -212,11 +215,18 @@ public:
     //CkPrintf("\n[PE-%d]Responding with %d val for idx %d, the %dth request", thisIndex, p2.val, p.val, p2.idx);
 //    CkPrintf("\nReceived request"); fflush(stdout);
     tram_resp->insertValue(p2, p.pe);
+//    thisProxy[p.pe].responseData(p2);//myResponse(p2);
   }
 
   inline void responseData(const packet1& p){//const CmiInt8& key) {
     if(p.idx%128==0) latency += (CkWallTimer()-local_timestamps[p.idx/128]);
     tgt[p.idx] = p.val;
+    packet1 p2;
+    p2.val = pckindx[p.idx] >> 16;;
+    p2.idx = p.idx;
+    p2.pe = CkMyPe();
+    int pe = pckindx[p.idx] & 0xffff;
+    if(++count[p.idx]<3) tram_req->insertValue(p2, pe);
     //CkPrintf("\n[PE-%d]Received value tgt[%d] =  %d", thisIndex, p.idx, p.val);
     //if(p.idx%256==255) tram_resp->tflush();
   }
@@ -242,6 +252,8 @@ public:
 
     tram_req->set_func_ptr(Updater::requestDataCaller, this); //requestData
     tram_resp->set_func_ptr(Updater::responseDataCaller, this);
+//    tram_req->reset_stats(2, 2048, PNs);
+//    tram_resp->reset_stats(2, 2048, PNs);
 //    CkPrintf("\nDone w preGen");
     //respondWData
 //    tram->reset_stats(buf_type, buf_size, agtype);
@@ -276,14 +288,16 @@ public:
       p.idx = i;
       p.pe = CkMyPe();
       if(i%128==0) local_timestamps[i/128] = CkWallTimer();
-    //   thisProxy(pe).myRequest(p);
+      // thisProxy[pe].requestData(p);//myRequest(p);
       //CkPrintf("\n[PE-%d] request for index %d from pe %d, as %dth request", thisIndex, col, pe, i);
       tram_req->insertValue(p, pe);
 //      if(i%128==0) tram_req->tflush();
 
         // TODO: Test with something other than % or test with something equal to 2^n
-      if  ((i % 10000) == 9999) CthYield();
+      if  ((i % 5000) == 4999) CthYield();
+//      if(i == l_num_req*0.75) tram_resp->enableIdleFlush();
     }
+    //tram_resp->enableIdleFlush();
     tram_req->tflush();
 //    CkPrintf("\n[PE-%d] Done sending latency = %lf/8 = %lf/# of msgs\n", thisIndex, latency, latency/8);
   }
@@ -310,6 +324,7 @@ public:
       int _pe = index_k%CkNumPes();
       int index_i = _pe*ltab_siz + l_indx;
 //      CkPrintf("\nEndPE[%d] index[%d] = %d", thisIndex, i, index[i]);
+#if 1
       if(tgt[i] != (-1*index_i)-1){
         numErrors++;
         if(numErrors < 5)  // print first five errors, report all the errors
@@ -317,8 +332,15 @@ public:
                   0,  CkMyPe(), i, tgt[i],index[i],index_i, ((-1)*index_i)-1);
         //use_model,  MYTHREAD, i, tgt[i],(-1)*(i*THREADS+MYTHREAD + 1) );
       }
+#endif
       tgt[i] = 0;
     }
+#if 0
+    int flush_count = tram_req->flush_msg_count + tram_resp->flush_msg_count;
+    int agg_count = tram_req->agg_msg_count + tram_req->agg_msg_count;
+    if(flush_count || agg_count)
+      CkPrintf("\nPE-%d, msg count = %d(agg), %d(flush)", thisIndex, agg_count, flush_count);
+#endif
     // Sum the errors observed across the entire system
     contribute(sizeof(CmiInt8), &numErrors, CkReduction::sum_long,
                CkCallback(CkReductionTarget(TestDriver, reportErrors),

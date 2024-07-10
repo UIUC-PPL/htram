@@ -4,6 +4,10 @@
 //#define PER_DESTPE_BUFFER
 //#define NODE_SRC_BUFFER
 //#define LOCAL_BUF
+//#define IDLE_FLUSH
+#ifdef IDLE_FLUSH
+#define PARTIAL_FLUSH 0.2
+#endif
 #define ALL_BUF_TYPES
 #include "htram_group.decl.h"
 /* readonly */ extern CProxy_HTram tram_proxy;
@@ -12,14 +16,11 @@
 #include "packet.h"
 using namespace std;
 #define SIZE_LIST (int[]){1024, 512, 2048}
-#define BUFSIZE 1024
-#define BUFSIZE_SMALL 512
-#define BUFSIZE_MED 1024
-#define BUFSIZE_LARGE1 2048
-#define BUFSIZE_LARGE2 4096
-#define LOCAL_BUFSIZE 16
+#define BUFSIZE 1024//4096//2048//512//1024//256//1024//2048//1024//4096//2048//4096//2048//1024
+//2048//1024//512//1024//1600//512//1600//1024//4096//2048//1024
+#define LOCAL_BUFSIZE 16//8
 #define PPN_COUNT 8
-#define NODE_COUNT 64
+#define NODE_COUNT 512
 
 #define TOTAL_LATENCY 0
 #define MAX_LATENCY 1
@@ -40,73 +41,16 @@ struct item {
 };
 
 //typedef std::pair<int,int> datatype;
-//typedef int datatype;
+typedef int datatype;
 
-typedef packet1 datatype;
+//typedef packet1 datatype;
 
 typedef item<datatype> itemT;
 
-class BaseMsg {
+class HTramMessage : public CMessage_HTramMessage {
   public:
-  virtual itemT* getBuffer(){};
-  virtual double* getTimer(){};
-  virtual int* getIndex(){};
-  virtual int* getNext(){};
-  virtual int* getDoTimer(){};
-};
-
-class HTramMessage : public BaseMsg, public CMessage_HTramMessage {
-  public:
-    HTramMessage() {next = 0;}
-    HTramMessage(int size, itemT *buf): next(size) {
-      std::copy(buf, buf+size, buffer);
-    }
+    int next{0}; //next available slot in buffer
     itemT buffer[BUFSIZE];
-    int index[PPN_COUNT] = {-1};
-    double timer[2];
-    int do_timer {1};
-    int next{0}; //next available slot in buffer
-    itemT* getBuffer() {return buffer;}
-    double* getTimer() {return timer;}
-    int* getIndex() {return index;}
-    int* getNext() {return &next;}
-    int* getDoTimer() {return &do_timer;}
-};
-
-class HTramMessageSmall : public BaseMsg, public CMessage_HTramMessageSmall {
-  public:
-    HTramMessageSmall() {next = 0;}
-    HTramMessageSmall(int size, itemT *buf): next(size) {
-      std::copy(buf, buf+size, buffer);
-    }
-    itemT buffer[BUFSIZE_SMALL];
-    int index[PPN_COUNT] = {-1};
-    double timer[2];
-    int do_timer {1};
-    int next{0}; //next available slot in buffer
-    itemT* getBuffer() {return buffer;}
-    double* getTimer() {return timer;}
-    int* getIndex() {return index;}
-    int* getNext() {return &next;}
-    int* getDoTimer() {return &do_timer;}
-};
-
-class HTramMessageLarge : public BaseMsg, public CMessage_HTramMessageLarge {
-  public:
-    HTramMessageLarge() {next = 0;}
-    HTramMessageLarge(int size, itemT *buf): next(size) {
-      std::copy(buf, buf+size, buffer);
-    }
-    itemT buffer[BUFSIZE_LARGE1];
-    int index[PPN_COUNT] = {-1};
-    double timer[2];
-    int do_timer {1};
-    int next{0}; //next available slot in buffer
-    itemT* getBuffer() {return buffer;}
-    double* getTimer() {return timer;}
-    int* getIndex() {return index;}
-    int* getNext() {return &next;}
-    int* getDoTimer() {return &do_timer;}
 };
 
 class HTramLocalMessage : public CMessage_HTramLocalMessage {
@@ -123,7 +67,7 @@ class HTramLocalMessage : public CMessage_HTramLocalMessage {
 class HTramNodeMessage : public CMessage_HTramNodeMessage {
   public:
     HTramNodeMessage() {}
-    datatype buffer[BUFSIZE_LARGE1];
+    datatype buffer[BUFSIZE];
     int offset[PPN_COUNT];
 };
 
@@ -134,7 +78,7 @@ class HTramNodeGrp : public CBase_HTramNodeGrp {
     std::atomic_int get_idx[NODE_COUNT];
     std::atomic_int done_count[NODE_COUNT];
 //    HTramMessage
-    BaseMsg **msgBuffers;
+    HTramMessage **msgBuffers;
     HTramNodeGrp();
     HTramNodeGrp(CkMigrateMessage* msg);
 };
@@ -164,7 +108,7 @@ class HTram : public CBase_HTram {
     HTramNodeGrp* srcNodeGrp;
     HTramRecv* nodeGrp;
 //    HTramMessage
-    BaseMsg **msgBuffers;
+    HTramMessage **msgBuffers;
     HTramLocalMessage **local_buf;
     HTramMessage *localMsgBuffer;
     std::vector<itemT>* localBuffers;
@@ -172,6 +116,8 @@ class HTram : public CBase_HTram {
     bool enable_flush;
     int bufSize;
     int prevBufSize;
+    int agg_msg_count;
+    int flush_msg_count;
     HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enable_timed_flushing, double flush_timer, bool ret_item, bool req, CkCallback start_cb);
     HTram(CkGroupID gid, CkCallback cb);
     HTram(CkMigrateMessage* msg);
@@ -181,14 +127,14 @@ class HTram : public CBase_HTram {
     void copyToNodeBuf(int destnode, int increment);
     void insertValue(datatype send_value, int dest_pe);
     void reset_stats(int buf_type, int buf_size, int agtype);
-    void tflush();
+    void enableIdleFlush();
+    void tflush(bool idleflush=false);
+    bool idleFlush();
     void avgLatency(CkCallback cb);
 //#ifdef SRC_GROUPING
     void receivePerPE(HTramMessage *);
 //#elif defined PER_DESTPE_BUFFER
     void receiveOnPE(HTramMessage* msg);
-    void receiveOnPESmall(HTramMessageSmall* msg);
-    void receiveOnPELarge(HTramMessageLarge* msg);
 //    void receiveOnPELarge(HTramMessageSmall* msg);
 //#else
     void receivePerPE(HTramNodeMessage *);
@@ -209,12 +155,8 @@ class HTramRecv : public CBase_HTramRecv {
     void setTramProxy(CkGroupID);
 //#ifndef PER_DESTPE_BUFFER
     void receive(HTramMessage*);
-    void receiveSmall(HTramMessageSmall*);
-    void receiveLarge(HTramMessageLarge*);
 
     void receive_no_sort(HTramMessage*);
-    void receive_no_sortSmall(HTramMessageSmall*);
-    void receive_no_sortLarge(HTramMessageLarge*);
     void receive_small(HTramLocalMessage*);
     void avgLatency(CkCallback cb);
 //#endif
