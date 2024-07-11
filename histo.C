@@ -111,7 +111,7 @@ public:
     
     CkPrintf("   %8.3lf seconds\n", update_walltime);
       CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
-//      updater_array.generateUpdatesVerify();
+      updater_array.generateUpdatesVerify();
       CkStartQD(endCb);
   }
 
@@ -223,7 +223,7 @@ public:
       // Submit generated key to chare owning that portion of the table
       tram->insertValue(col, pe);
 
-      if  ((i % 2048) == 2047) CthYield();
+      if  ((i % 2048) == 2047) {/*tram->tflush();*/ CthYield();}
     }
     tram->tflush();
   }
@@ -244,7 +244,7 @@ public:
 
   void checkErrors() {
     CmiInt8 numErrors = 0;
-#if 0
+#if 1
     for(CmiInt8 i = 0; i < lnum_counts; i++) {
       if(counts[i] != 0L) {
         numErrors++;
