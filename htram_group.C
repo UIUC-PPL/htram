@@ -44,7 +44,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
     if(thisIndex==0) CkPrintf("\nDest-node side grouping/sorting enabled (1 buffer per src-pe, per dest-node)\n");
 */
   ret_list = !ret_item;
-  agg = NNs;//PP;//NNs;//NNs;//PNs;//NNs;//PP;
+  agg = PNs;//PP;//NNs;//NNs;//PNs;//NNs;//PP;
   myPE = CkMyPe();
   msgBuffers = (new HTramMessage*[CkNumPes()]);
 
@@ -52,6 +52,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
     if(agg == PNs) CkPrintf("\nAggregation type: PNs with buffer size %d", BUFSIZE);
     else if(agg == NNs) CkPrintf("\nAggregation type: NNs with buffer size %d",BUFSIZE);
     else if(agg == PP) CkPrintf("\nAggregation type: PP with buffer size %d", BUFSIZE);
+    else if(agg = PsN)  CkPrintf("\nAggregation type: PsN with buffer size %d", BUFSIZE);
   }
 
   localMsgBuffer = new HTramMessage();

@@ -35,7 +35,7 @@ module htram_group{
   nodegroup HTramRecv {
     entry HTramRecv();
     entry [expedited] void receive(HTramMessage*);
-    entry void receive_no_sort(HTramMessage*);
+    entry [expedited] void receive_no_sort(HTramMessage*);
     entry void receive_small(HTramLocalMessage*);
     entry void avgLatency(CkCallback cb);
   }
