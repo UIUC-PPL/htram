@@ -44,7 +44,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
     if(thisIndex==0) CkPrintf("\nDest-node side grouping/sorting enabled (1 buffer per src-pe, per dest-node)\n");
 */
   ret_list = !ret_item;
-  agg = PNs;//PP;//NNs;//NNs;//PNs;//NNs;//PP;
+  agg = NNs;//NNs;//PNs;//NNs;//PP;
   myPE = CkMyPe();
   msgBuffers = (new HTramMessage*[CkNumPes()]);
 
@@ -267,8 +267,8 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
     agg_msg_count++;
     srcNodeGrp->msgBuffers[destnode]->next = BUFSIZE;
     
-      nodeGrpProxy[destnode].receive(srcNodeGrp->msgBuffers[destnode]);
-      srcNodeGrp->msgBuffers[destnode] = new HTramMessage();
+    nodeGrpProxy[destnode].receive(srcNodeGrp->msgBuffers[destnode]);
+    srcNodeGrp->msgBuffers[destnode] = new HTramMessage();
     srcNodeGrp->done_count[destnode] = 0;
     srcNodeGrp->get_idx[destnode] = 0;
   }
@@ -293,11 +293,18 @@ void HTram::tflush(bool idleflush) {
       local_idx[i] = 0;
     }
     //If you're last rank on node to flush, then flush your buffer and by setting idx to a high count, node level buffer as well
-    if(flush_count+1==CkNodeSize(0))
+//    if(flush_count+1==CkNodeSize(0))
     {
       for(int i=0;i<CkNumNodes();i++) {
+#if 1
         if(srcNodeGrp->done_count[i]) {
           flush_msg_count++;
+#if 1
+          int idx = srcNodeGrp->get_idx[i].fetch_add(BUFSIZE, std::memory_order_relaxed);
+          int done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_relaxed);
+          if(idx >= BUFSIZE) continue;
+          while(idx!=done_count) { done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_relaxed);}
+#endif
   //          CkPrintf("\nCalling TFLUSH---\n");
           srcNodeGrp->msgBuffers[i]->next = srcNodeGrp->done_count[i];
           ((envelope *)UsrToEnv(srcNodeGrp->msgBuffers[i]))->setUsersize(sizeof(int)+sizeof(envelope)+sizeof(itemT)*srcNodeGrp->msgBuffers[i]->next);
@@ -314,6 +321,7 @@ void HTram::tflush(bool idleflush) {
           srcNodeGrp->flush_count = 0;
           srcNodeGrp->get_idx[i] = 0;
         }
+#endif
 //          localMsgBuffer = new HTramMessage();
         
       }
