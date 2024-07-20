@@ -225,7 +225,7 @@ public:
 
       if  ((i % 2048) == 2047) {/*tram->tflush();*/ CthYield();}
     }
-    tram->tflush();
+    tram->tflush(true,0.9);
   }
 
   void generateUpdatesVerify() {

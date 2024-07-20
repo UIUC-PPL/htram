@@ -280,7 +280,8 @@ void HTram::enableIdleFlush() {
   CkCallWhenIdle(CkIndex_HTram::idleFlush(), this);
 #endif
 }
-void HTram::tflush(bool idleflush) {
+
+void HTram::tflush(bool idleflush, double fraction) {
 //    CkPrintf("\nCalling flush on PE-%d", thisIndex); fflush(stdout);
   if(agg == NNs) {
 #if 1
@@ -334,11 +335,11 @@ void HTram::tflush(bool idleflush) {
 
     for(int i=0;i<buf_count;i++) {
 //      if(msgBuffers[i]->next)
-#ifdef IDLE_FLUSH
-      if((!idleflush && msgBuffers[i]->next) || (idleflush && msgBuffers[i]->next > BUFSIZE*PARTIAL_FLUSH))
-#else
-      if(!idleflush && msgBuffers[i]->next)
-#endif
+//#ifdef IDLE_FLUSH
+      if((!idleflush && msgBuffers[i]->next) || (idleflush && msgBuffers[i]->next > BUFSIZE*fraction))
+//#else
+//      if(!idleflush && msgBuffers[i]->next)
+//#endif
       {
         flush_msg_count++;
 //        if(idleflush) CkPrintf("\n[PE-%d] flushing buf[%d] at %d", CkMyPe(), i,  msgBuffers[i]->next);

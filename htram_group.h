@@ -10,7 +10,7 @@
 #endif
 #define ALL_BUF_TYPES
 #include "htram_group.decl.h"
-/* readonly */ extern CProxy_HTram tram_proxy;
+///* readonly */ extern CProxy_HTram tram_proxy;
 ///* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
 ///* readonly */ extern CProxy_HTramNodeGrp srcNodeGrpProxy;
 #include "packet.h"
@@ -128,7 +128,7 @@ class HTram : public CBase_HTram {
     void insertValue(datatype send_value, int dest_pe);
     void reset_stats(int buf_type, int buf_size, int agtype);
     void enableIdleFlush();
-    void tflush(bool idleflush=false);
+    void tflush(bool idleflush=false, double fraction=1.0);
     bool idleFlush();
     void avgLatency(CkCallback cb);
 //#ifdef SRC_GROUPING
