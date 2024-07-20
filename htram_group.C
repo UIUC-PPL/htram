@@ -308,18 +308,19 @@ void HTram::getRecvCount() {
 
 void HTram::resetCounts(){
   local_sends = 0;
+  local_recv_count = 0;
   if(thisIndex == 0) sends = 0;
-  contribute(gb_flush_cb);
+//  contribute(gb_flush_cb);
 }
 
 void HTram::checkCounts(int received) {
+//  CkPrintf("\nSends = %d, recvs = %d", sends, received);
   if(sends != received) thisProxy.getRecvCount();
   else thisProxy.resetCounts();
-  CkPrintf("\nSends = %d, recvs = %d", sends, received);
 }
 
 void HTram::tflush(bool idleflush, double fraction) {
-    CkPrintf("\nCalling flush on PE-%d", thisIndex); fflush(stdout);
+//    CkPrintf("\nCalling flush on PE-%d", thisIndex); fflush(stdout);
   if(agg == NNs) {
     int flush_count = srcNodeGrp->flush_count.fetch_add(1, std::memory_order_seq_cst);
     //Send your local buffer
@@ -395,9 +396,7 @@ void HTram::tflush(bool idleflush, double fraction) {
           ((envelope *)UsrToEnv(destMsg))->setUsersize(sizeof(int)*2+sizeof(envelope)+sizeof(itemT)*(destMsg->next));
 //          nodeGrpProxy[i].receive(destMsg); //todo - Resize only upto next
           if(track_count) {
-            local_sends = destMsg->next;
-            CkCallback _cb(CkReductionTarget(HTram, getTotSends), thisProxy[0]);
-            contribute(sizeof(int), &local_sends, CkReduction::sum_int, _cb);
+            local_sends += destMsg->next;
             destMsg->track_count = 1;
           }
           nodeGrpProxy[i].receive(destMsg);
@@ -411,6 +410,12 @@ void HTram::tflush(bool idleflush, double fraction) {
           msgBuffers[i] = new HTramMessage();
       }
     }
+    if(agg == PNs && track_count) {
+//      CkPrintf("\nPE-%d sending a reduction %d", CkMyPe(), local_sends);
+      CkCallback _cb(CkReductionTarget(HTram, getTotSends), thisProxy[0]);
+      contribute(sizeof(int), &local_sends, CkReduction::sum_int, _cb);
+    }
+
   }
 }
 
