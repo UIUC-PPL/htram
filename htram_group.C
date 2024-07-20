@@ -38,6 +38,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
   msg_stats[MIN_LATENCY] = 100.0;
   agg_msg_count = 0;
   flush_msg_count = 0;
+  local_recv_count = 0;
 //  if(thisIndex==0) CkPrintf("\nbuf_type = %d, type %d,%d,%d,%d", buf_type, use_src_grouping, use_src_agg, use_per_destpe_agg, use_per_destnode_agg);
 /*
   if(use_per_destnode_agg)
@@ -281,10 +282,45 @@ void HTram::enableIdleFlush() {
 #endif
 }
 
+//Assume to be called only on PE-0
+void HTram::global_flush(CkCallback cb) {
+  gb_flush_cb = cb;
+  for(int i=0;i<CkNumPes();i++)
+    thisProxy[i].trackflush();
+}
+
+void HTram::trackflush() {
+  track_count = true;
+  tflush();
+}
+
+//Reduction method called on PE-0
+void HTram::getTotSends(int s_total) {
+  sends = s_total;
+  CkPrintf("\nTotal sends = %d", sends);
+  thisProxy.getRecvCount();
+}
+
+void HTram::getRecvCount() {
+  CkCallback _cb(CkReductionTarget(HTram, checkCounts), thisProxy[0]);
+  contribute(sizeof(int), &local_recv_count, CkReduction::sum_int, _cb);
+}
+
+void HTram::resetCounts(){
+  local_sends = 0;
+  if(thisIndex == 0) sends = 0;
+  contribute(gb_flush_cb);
+}
+
+void HTram::checkCounts(int received) {
+  if(sends != received) thisProxy.getRecvCount();
+  else thisProxy.resetCounts();
+  CkPrintf("\nSends = %d, recvs = %d", sends, received);
+}
+
 void HTram::tflush(bool idleflush, double fraction) {
-//    CkPrintf("\nCalling flush on PE-%d", thisIndex); fflush(stdout);
+    CkPrintf("\nCalling flush on PE-%d", thisIndex); fflush(stdout);
   if(agg == NNs) {
-#if 1
     int flush_count = srcNodeGrp->flush_count.fetch_add(1, std::memory_order_seq_cst);
     //Send your local buffer
     for(int i=0;i<CkNumNodes();i++) {
@@ -297,18 +333,17 @@ void HTram::tflush(bool idleflush, double fraction) {
 //    if(flush_count+1==CkNodeSize(0))
     {
       for(int i=0;i<CkNumNodes();i++) {
-#if 1
-        if(srcNodeGrp->done_count[i]) {
+        if((!idleflush && srcNodeGrp->done_count[i]) || (idleflush && srcNodeGrp->done_count[i] > BUFSIZE*fraction)) {
+//        if(srcNodeGrp->done_count[i]) {
           flush_msg_count++;
-#if 1
+
           int idx = srcNodeGrp->get_idx[i].fetch_add(BUFSIZE, std::memory_order_relaxed);
           int done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_relaxed);
           if(idx >= BUFSIZE) continue;
           while(idx!=done_count) { done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_relaxed);}
-#endif
-  //          CkPrintf("\nCalling TFLUSH---\n");
+
           srcNodeGrp->msgBuffers[i]->next = srcNodeGrp->done_count[i];
-          ((envelope *)UsrToEnv(srcNodeGrp->msgBuffers[i]))->setUsersize(sizeof(int)+sizeof(envelope)+sizeof(itemT)*srcNodeGrp->msgBuffers[i]->next);
+          ((envelope *)UsrToEnv(srcNodeGrp->msgBuffers[i]))->setUsersize(sizeof(int)*2+sizeof(envelope)+sizeof(itemT)*srcNodeGrp->msgBuffers[i]->next);
  /* 
           CkPrintf("\n[PE-%d]TF-Sending out data with size = %d", thisIndex, srcNodeGrp->msgBuffers[i]->next);
           for(int j=0;j<srcNodeGrp->msgBuffers[i]->next;j++)
@@ -322,12 +357,9 @@ void HTram::tflush(bool idleflush, double fraction) {
           srcNodeGrp->flush_count = 0;
           srcNodeGrp->get_idx[i] = 0;
         }
-#endif
 //          localMsgBuffer = new HTramMessage();
-        
       }
     }
-#endif
   }
   else {
     int buf_count = CkNumNodes();
@@ -360,11 +392,18 @@ void HTram::tflush(bool idleflush, double fraction) {
         }
         else if(agg == PNs)
         {
-          ((envelope *)UsrToEnv(destMsg))->setUsersize(sizeof(int)+sizeof(envelope)+sizeof(itemT)*(destMsg->next));
+          ((envelope *)UsrToEnv(destMsg))->setUsersize(sizeof(int)*2+sizeof(envelope)+sizeof(itemT)*(destMsg->next));
 //          nodeGrpProxy[i].receive(destMsg); //todo - Resize only upto next
+          if(track_count) {
+            local_sends = destMsg->next;
+            CkCallback _cb(CkReductionTarget(HTram, getTotSends), thisProxy[0]);
+            contribute(sizeof(int), &local_sends, CkReduction::sum_int, _cb);
+            destMsg->track_count = 1;
+          }
           nodeGrpProxy[i].receive(destMsg);
+          //count_local = destMsg->next;
         } else if(agg == PP) {
-          ((envelope *)UsrToEnv(destMsg))->setUsersize(sizeof(int)+sizeof(envelope)+sizeof(itemT)*destMsg->next);
+          ((envelope *)UsrToEnv(destMsg))->setUsersize(sizeof(int)*2+sizeof(envelope)+sizeof(itemT)*destMsg->next);
 //          CkPrintf("\nmsg size = %d", *destMsg->next);
           thisProxy[i].receiveOnPE(destMsg);
         }
@@ -500,7 +539,8 @@ void HTramRecv::receive(HTramMessage* agg_message) {
   //nodegroup //reference from group
   int rank0PE = CkNodeFirst(thisIndex);
   HTramNodeMessage* sorted_agg_message = new HTramNodeMessage();
-  
+  sorted_agg_message->track_count = agg_message->track_count;
+
   int sizes[PPN_COUNT] = {0};
   
   for(int i=0;i<agg_message->next;i++) {
@@ -582,6 +622,7 @@ void HTram::receivePerPE(HTramNodeMessage* msg) {
   } else
     cb_retarr(objPtr, &msg->buffer[llimit], ulimit-llimit);
   CkFreeMsg(msg);
+  if(msg->track_count) local_recv_count += (ulimit-llimit);
 }
 //#endif
 

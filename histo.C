@@ -107,6 +107,7 @@ public:
 
 //#define VERIFY
   void startVerificationPhase() {
+    tram_proxy[0].global_flush(CkCallback::ignore);
     update_walltime = CkWallTimer() - starttime;
     
     CkPrintf("   %8.3lf seconds\n", update_walltime);
@@ -225,7 +226,7 @@ public:
 
       if  ((i % 2048) == 2047) {/*tram->tflush();*/ CthYield();}
     }
-    tram->tflush(true,0.9);
+    //tram->tflush();//tram->tflush(true,0.9);
   }
 
   void generateUpdatesVerify() {

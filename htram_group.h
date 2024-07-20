@@ -50,6 +50,7 @@ typedef item<datatype> itemT;
 class HTramMessage : public CMessage_HTramMessage {
   public:
     int next{0}; //next available slot in buffer
+    int track_count{0};
     itemT buffer[BUFSIZE];
 };
 
@@ -69,6 +70,7 @@ class HTramNodeMessage : public CMessage_HTramNodeMessage {
     HTramNodeMessage() {}
     datatype buffer[BUFSIZE];
     int offset[PPN_COUNT];
+    int track_count{0};
 };
 
 class HTramNodeGrp : public CBase_HTramNodeGrp {
@@ -99,6 +101,7 @@ class HTram : public CBase_HTram {
     CkCallback return_cb;
     int myPE, buf_type;
     int agg;
+    int local_recv_count;
     bool ret_list;
     bool request;
     double flush_time;
@@ -114,10 +117,13 @@ class HTram : public CBase_HTram {
     std::vector<itemT>* localBuffers;
   public:
     bool enable_flush;
+    bool track_count;
     int bufSize;
+    int local_sends, sends;
     int prevBufSize;
     int agg_msg_count;
     int flush_msg_count;
+    CkCallback gb_flush_cb;
     HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enable_timed_flushing, double flush_timer, bool ret_item, bool req, CkCallback start_cb);
     HTram(CkGroupID gid, CkCallback cb);
     HTram(CkMigrateMessage* msg);
@@ -128,7 +134,13 @@ class HTram : public CBase_HTram {
     void insertValue(datatype send_value, int dest_pe);
     void reset_stats(int buf_type, int buf_size, int agtype);
     void enableIdleFlush();
+    void getTotSends(int);
+    void trackflush();
+    void checkCounts(int);
+    void getRecvCount();
+    void resetCounts();
     void tflush(bool idleflush=false, double fraction=1.0);
+    void global_flush(CkCallback);
     bool idleFlush();
     void avgLatency(CkCallback cb);
 //#ifdef SRC_GROUPING
