@@ -26,8 +26,11 @@ module htram_group{
     entry void trackflush();
     entry void getRecvCount();
     entry void resetCounts();
+    entry void sanityCheck();
     entry [reductiontarget] void checkCounts(int);
     entry [reductiontarget] void getTotSends(int);
+    entry [reductiontarget] void getTotSendCount(int);
+    entry [reductiontarget] void getTotRecvCount(int);
     entry void global_flush(CkCallback cb);
     entry [whenidle] bool idleFlush();
     entry void receivePerPE(HTramMessage*);

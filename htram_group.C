@@ -39,6 +39,8 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
   agg_msg_count = 0;
   flush_msg_count = 0;
   local_recv_count = 0;
+  tot_recv_count = 0;
+  tot_send_count = 0;
 //  if(thisIndex==0) CkPrintf("\nbuf_type = %d, type %d,%d,%d,%d", buf_type, use_src_grouping, use_src_agg, use_per_destpe_agg, use_per_destnode_agg);
 /*
   if(use_per_destnode_agg)
@@ -161,6 +163,7 @@ HTram::HTram(CkMigrateMessage* msg) {}
 //one per node, message, fixed 
 //Client inserts
 void HTram::insertValue(datatype value, int dest_pe) {
+  tot_send_count++;
 //  CkPrintf("\nInserting on PE-%d", dest_pe);
   int destNode = dest_pe/CkNodeSize(0); //find safer way to find dest node,
   // node size is not always same
@@ -616,6 +619,19 @@ void HTramRecv::setTramProxy(CkGroupID tram_gid) {
 }
 
 
+void HTram::sanityCheck() {
+  contribute(sizeof(int), &tot_send_count, CkReduction::sum_int, CkCallback(CkReductionTarget(HTram, getTotSendCount), thisProxy[0]));
+  contribute(sizeof(int), &tot_recv_count, CkReduction::sum_int, CkCallback(CkReductionTarget(HTram, getTotRecvCount), thisProxy[0]));
+}
+
+void HTram::getTotSendCount(int scount){
+  CkPrintf("\nTotal items sent via tram library = %d", scount);
+}
+
+void HTram::getTotRecvCount(int rcount){
+  CkPrintf("\nTotal items recevied via tram library = %d", rcount);
+}
+
 void HTram::receivePerPE(HTramNodeMessage* msg) {
   int llimit = 0;
   int rank = CkMyRank();
@@ -627,6 +643,7 @@ void HTram::receivePerPE(HTramNodeMessage* msg) {
   } else
     cb_retarr(objPtr, &msg->buffer[llimit], ulimit-llimit);
   CkFreeMsg(msg);
+  tot_recv_count += (ulimit-llimit);
   if(msg->track_count) local_recv_count += (ulimit-llimit);
 }
 //#endif

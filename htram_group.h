@@ -101,7 +101,7 @@ class HTram : public CBase_HTram {
     CkCallback return_cb;
     int myPE, buf_type;
     int agg;
-    int local_recv_count;
+    int local_recv_count, tot_recv_count, tot_send_count;
     bool ret_list;
     bool request;
     double flush_time;
@@ -138,6 +138,9 @@ class HTram : public CBase_HTram {
     void trackflush();
     void checkCounts(int);
     void getRecvCount();
+    void sanityCheck();
+    void getTotSendCount(int);
+    void getTotRecvCount(int);
     void resetCounts();
     void tflush(bool idleflush=false, double fraction=1.0);
     void global_flush(CkCallback);
