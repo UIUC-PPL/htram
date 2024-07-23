@@ -6,6 +6,8 @@ module htram_group{
   message HTramMessage {
     int next;
     int track_count;
+    int srcPe;
+    int *ack_count;
     itemT *buffer;
   };
 
@@ -27,6 +29,7 @@ module htram_group{
     entry void getRecvCount();
     entry void resetCounts();
     entry void sanityCheck();
+    entry void releaseMessages();
     entry [reductiontarget] void checkCounts(int);
     entry [reductiontarget] void getTotSends(int);
     entry [reductiontarget] void getTotSendCount(int);

@@ -107,7 +107,7 @@ public:
 
 //#define VERIFY
   void startVerificationPhase() {
-//    tram_proxy[0].global_flush(CkCallback::ignore);
+    //tram_proxy[0].global_flush(CkCallback::ignore);
     update_walltime = CkWallTimer() - starttime;
     tram_proxy.sanityCheck();
     CkPrintf("   %8.3lf seconds\n", update_walltime);
@@ -138,6 +138,7 @@ private:
   CmiInt8 *index;
   CmiInt8 *pckindx;
   CmiInt8 num_counts;
+  std::vector<int> *tram_hold;
   tram_proxy_t tram_proxy;
   tram_t* tram;
   int count;
@@ -145,6 +146,7 @@ public:
   Updater(CkGroupID tram_id, int k) {
     count = 0;
     tram_proxy = CProxy_HTram(tram_id);
+    tram_hold = new std::vector<int>[10]; //10 prio buckets, say
   
     // Compute table start for this chare
     // CkPrintf("[PE%d] Update (thisIndex=%d) created: lnum_counts = %d, l_num_ups =%d\n", CkMyPe(), thisIndex, lnum_counts, l_num_ups);
@@ -205,6 +207,7 @@ public:
   void preGenerateUpdates() {
     tram = tram_proxy.ckLocalBranch();
     tram->set_func_ptr(Updater::insertDataCaller, this);
+    tram->shareArrayOfBuckets(tram_hold);
 //    tram->reset_stats(buf_type, buf_size, agtype);
 #ifdef RETURN_ITEMLIST
     tram->set_func_ptr_retarr(Updater::insertDataArrCaller, this);
@@ -219,14 +222,21 @@ public:
     CmiInt8 pe, col;
 
     for(CmiInt8 i = 0; i < l_num_ups; i++) {
-      col = pckindx[i] >> 16;
+      col = pckindx[i];// >> 16;
       pe  = pckindx[i] & 0xffff;
+//      CkPrintf("\n[PE-%d] pushing data %d for dest pe %d", thisIndex, col >> 16, col & 0xffff);
+      tram_hold[0].push_back(col);
       // Submit generated key to chare owning that portion of the table
-      tram->insertValue(col, pe);
+//      tram->insertValue(col, pe);
 
-      if  ((i % 2048) == 2047) {/*tram->tflush();*/ CthYield();}
+      if  ((i % 128) == 127) {tram->releaseMessages();/*tram->tflush();*/ CthYield();}
     }
-    tram->tflush();//tram->tflush(true,0.9);
+    tram->releaseMessages();
+    tram->releaseMessages();
+    tram->releaseMessages(true);
+    tram->tflush();
+    tram->tflush();
+    //tram->tflush();//tram->tflush(true,0.9);
   }
 
   void generateUpdatesVerify() {
@@ -244,6 +254,7 @@ public:
   }
 
   void checkErrors() {
+    tram->sanityCheck();
     CmiInt8 numErrors = 0;
 #if 1
     for(CmiInt8 i = 0; i < lnum_counts; i++) {

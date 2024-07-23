@@ -55,13 +55,16 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
     if(agg == PNs) CkPrintf("\nAggregation type: PNs with buffer size %d", BUFSIZE);
     else if(agg == NNs) CkPrintf("\nAggregation type: NNs with buffer size %d",BUFSIZE);
     else if(agg == PP) CkPrintf("\nAggregation type: PP with buffer size %d", BUFSIZE);
-    else if(agg = PsN)  CkPrintf("\nAggregation type: PsN with buffer size %d", BUFSIZE);
+    else if(agg == PsN)  CkPrintf("\nAggregation type: PsN with buffer size %d", BUFSIZE);
   }
 
   localMsgBuffer = new HTramMessage();
 
-  for(int i=0;i<CkNumPes();i++)
+  for(int i=0;i<CkNumPes();i++) {
     msgBuffers[i] = new HTramMessage();
+    std::vector<HTramMessage*> buf_vec_pe;
+    overflowBuffers.push_back(buf_vec_pe);
+  }
 
 
   localBuffers = new std::vector<itemT>[CkNumPes()];
@@ -153,12 +156,85 @@ void HTram::set_func_ptr(void (*func)(void*, datatype), void* obPtr) {
   objPtr = obPtr;
 }
 
-void HTram::set_func_ptr_retarr(void (*func)(void*, datatype*, int), void* obPtr) {
+void HTram::set_func_ptr_retarr(void (*func)(void*, datatype*, int), int (*func2)(void*, int), void* obPtr) {
   cb_retarr = func;
+  get_dest_proc = func2;
   objPtr = obPtr;
 }
 
 HTram::HTram(CkMigrateMessage* msg) {}
+//int get_dest_proc(int vertex)
+void HTram::shareArrayOfBuckets(std::vector<datatype> *new_tram_hold) {
+  tram_hold = new_tram_hold;
+  //releaseMessages();
+}
+
+#define _K 4
+
+//On receive messages, I know that I can send more messages out, so after calling my receivePerPE
+//call flush tram again
+void HTram::releaseMessages(bool final_round) {
+  int overflow = 0;
+#if 1
+  for(int dest_node=0;dest_node<CkNumNodes();dest_node++) {
+//    if(overflowBuffers[dest_node].size())CkPrintf("\noverflowBuffers count = %d (send? %d<_K?)", overflowBuffers[dest_node].size(),nodeGrp->msgs_in_transit[CkMyRank()*CkNumNodes()+dest_node].load());
+    if(nodeGrp->msgs_in_transit[CkMyRank()*CkNumNodes()+dest_node] < _K) {
+      int j=0;
+      for(;j<overflowBuffers[dest_node].size() && nodeGrp->msgs_in_transit[CkMyRank()*CkNumNodes()+dest_node] < _K;j++) {
+        tot_send_count += overflowBuffers[dest_node][j]->next;
+        nodeGrpProxy[dest_node].receive(overflowBuffers[dest_node][j]);
+        nodeGrp->msgs_in_transit[CkMyRank()*CkNumNodes()+dest_node]++;
+//        CkPrintf("\n[PE-%d Sending overflow messages to node %d, in transit for the src-dest pair #[%d]", CkMyPe(), dest_node, nodeGrp->msgs_in_transit[CkMyRank()*CkNumNodes()+dest_node].load());
+      }
+      if(j)
+        overflowBuffers[dest_node].erase(overflowBuffers[dest_node].begin(), overflowBuffers[dest_node].begin() + j);
+    } else
+      overflow++;
+  }
+#endif
+//  CkPrintf("\nPE-%d overflow message count in storage = %d", CkMyPe(), overflow);
+  //copy from vectors in order of index into messages
+  int histo_bucket_count = 1;//512;
+  for(int i=0;i<histo_bucket_count;i++) {
+//    CkPrintf("\n[PE-%d] Going to empty out bucket of size %d", CkMyPe(), tram_hold[i].size());
+    for(int j=0;j<tram_hold[i].size();j++) {
+      datatype item = tram_hold[i][j] >> 16;
+      int dest_proc = tram_hold[i][j] & 0xffff;//get_dest_proc(objPtr, item);//.first);
+//      CkPrintf("\n[TramPE-%d] Adding data %d for dest %d in tram", CkMyPe(), item, dest_proc);
+      int dest_node = dest_proc/CkNodeSize(0);
+      HTramMessage* destMsg = msgBuffers[dest_node];
+      destMsg->buffer[destMsg->next].payload = item;
+      destMsg->buffer[destMsg->next].destPe = dest_proc;
+      destMsg->next++;
+      if(destMsg->next == BUFSIZE) {
+        destMsg->srcPe = CkMyPe();
+//        CkPrintf("\n[%d]msgs_in_transit[%d] = %d",CkMyPe(), dest_node, nodeGrp->msgs_in_transit[CkMyRank()*CkNumNodes()+dest_node].load());
+        if(nodeGrp->msgs_in_transit[CkMyRank()*CkNumNodes()+dest_node] < _K) {
+          nodeGrp->msgs_in_transit[CkMyRank()*CkNumNodes()+dest_node]++;
+#if 1
+          if(CkMyRank()==0) {
+            for(int k=0;k<CkNodeSize(0);k++) {
+              //assumes nodeGrp is on rank-0 on each node
+              destMsg->ack_count[k] = (nodeGrp->msgs_received_from[dest_node*CkNodeSize(0)+k]).exchange(0);
+            }
+          }
+#endif
+          tot_send_count += destMsg->next;
+//          CkPrintf("\n[PE-%d] Sending regular message to dest node %d", CkMyPe(), dest_node);
+          nodeGrpProxy[dest_node].receive(destMsg);
+        }
+#if 1
+        else {
+//          CkPrintf("\n[PE-%d] Storing overflow buffer for dest node %d", CkMyPe(), dest_node);
+          overflowBuffers[dest_node].push_back(destMsg);
+        }
+#endif
+        msgBuffers[dest_node] = new HTramMessage();
+      }
+    }
+    tram_hold[i].clear();
+  }
+}
 
 //one per node, message, fixed 
 //Client inserts
@@ -236,7 +312,7 @@ void HTram::insertValue(datatype value, int dest_pe) {
         } else {
 //          if(request) CkPrintf("\nSending msg from requesting htram");
 //          else CkPrintf("\nSending msg from responding htram");
-          nodeGrpProxy[destNode].receive(destMsg);
+            nodeGrpProxy[destNode].receive(destMsg);
         }
       }
       msgBuffers[dest_idx] = new HTramMessage();
@@ -347,7 +423,7 @@ void HTram::tflush(bool idleflush, double fraction) {
           while(idx!=done_count) { done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_relaxed);}
 
           srcNodeGrp->msgBuffers[i]->next = srcNodeGrp->done_count[i];
-          ((envelope *)UsrToEnv(srcNodeGrp->msgBuffers[i]))->setUsersize(sizeof(int)*2+sizeof(envelope)+sizeof(itemT)*srcNodeGrp->msgBuffers[i]->next);
+          ((envelope *)UsrToEnv(srcNodeGrp->msgBuffers[i]))->setUsersize(sizeof(int)*3+sizeof(envelope)+sizeof(itemT)*srcNodeGrp->msgBuffers[i]->next);
  /* 
           CkPrintf("\n[PE-%d]TF-Sending out data with size = %d", thisIndex, srcNodeGrp->msgBuffers[i]->next);
           for(int j=0;j<srcNodeGrp->msgBuffers[i]->next;j++)
@@ -396,16 +472,24 @@ void HTram::tflush(bool idleflush, double fraction) {
         }
         else if(agg == PNs)
         {
-          ((envelope *)UsrToEnv(destMsg))->setUsersize(sizeof(int)*2+sizeof(envelope)+sizeof(itemT)*(destMsg->next));
+          ((envelope *)UsrToEnv(destMsg))->setUsersize(sizeof(int)*(3+PPN_COUNT)+sizeof(envelope)+sizeof(itemT)*(destMsg->next));
 //          nodeGrpProxy[i].receive(destMsg); //todo - Resize only upto next
           if(track_count) {
             local_sends += destMsg->next;
             destMsg->track_count = 1;
           }
+          tot_send_count += destMsg->next;
+          destMsg->srcPe = CkMyPe();
+          if(CkMyRank()==0) {
+            for(int k=0;k<CkNodeSize(0);k++) {
+              //assumes nodeGrp is on rank-0 on each node
+              destMsg->ack_count[k] = (nodeGrp->msgs_received_from[i*CkNodeSize(0)+k]).exchange(0);
+            }
+          }
           nodeGrpProxy[i].receive(destMsg);
           //count_local = destMsg->next;
         } else if(agg == PP) {
-          ((envelope *)UsrToEnv(destMsg))->setUsersize(sizeof(int)*2+sizeof(envelope)+sizeof(itemT)*destMsg->next);
+          ((envelope *)UsrToEnv(destMsg))->setUsersize(sizeof(int)*3+sizeof(envelope)+sizeof(itemT)*destMsg->next);
 //          CkPrintf("\nmsg size = %d", *destMsg->next);
           thisProxy[i].receiveOnPE(destMsg);
         }
@@ -413,6 +497,20 @@ void HTram::tflush(bool idleflush, double fraction) {
           msgBuffers[i] = new HTramMessage();
       }
     }
+    if(agg == PNs) {
+      for(int dest_node=0;dest_node<CkNumNodes();dest_node++) {
+      int j=0;
+      for(;j<overflowBuffers[dest_node].size();j++) {
+        tot_send_count += overflowBuffers[dest_node][j]->next;
+        nodeGrpProxy[dest_node].receive(overflowBuffers[dest_node][j]);
+        nodeGrp->msgs_in_transit[CkMyRank()*CkNumNodes()+dest_node]++;
+//        CkPrintf("\n[PE-%d Sending overflow messages to node %d, in transit for the src-dest pair #[%d]", CkMyPe(), dest_node, nodeGrp->msgs_in_transit[CkMyRank()*CkNumNodes()+dest_node].load());
+      }
+      if(j)
+        overflowBuffers[dest_node].erase(overflowBuffers[dest_node].begin(), overflowBuffers[dest_node].begin() + j);
+    }
+
+  }
     if(agg == PNs && track_count) {
 //      CkPrintf("\nPE-%d sending a reduction %d", CkMyPe(), local_sends);
       CkCallback _cb(CkReductionTarget(HTram, getTotSends), thisProxy[0]);
@@ -435,7 +533,13 @@ HTramNodeGrp::HTramNodeGrp(CkMigrateMessage* msg) {}
 
 
 HTramRecv::HTramRecv(){
+  msgs_received_from = new std::atomic_int[CkNumPes()];
+  msgs_in_transit = new std::atomic_int[CkNumNodes()*CkNodeSize(0)];//For each PE on this node, maintain msgs in transit count per dest node
   msg_stats[MIN_LATENCY] = 100.0;
+  for(int i=0;i<CkNumPes();i++) {
+    msgs_in_transit[i] = 0;
+    msgs_received_from[i] = 0;
+  }
 }
 
 #if 0
@@ -457,23 +561,6 @@ HTramRecv::HTramRecv(CkMigrateMessage* msg) {}
 
 //#ifdef SRC_GROUPING
 void HTramRecv::receive_no_sort(HTramMessage* agg_message) {
-#if 0
-  if(agg_message->do_timer) {
-    double time_stamp = CkWallTimer();
-    double latency[2];
-    for(int i=0;i<2;i++) {
-      latency[i] = time_stamp - agg_message->timer[i];
-      msg_stats[TOTAL_LATENCY] += latency[i];
-    }
-    double max = std::max(latency[0], latency[1]);
-    if(msg_stats[MAX_LATENCY] < max)
-      msg_stats[MAX_LATENCY] = max;
-    double min = std::min(latency[0], latency[1]);
-    if(msg_stats[MIN_LATENCY] > min)
-      msg_stats[MIN_LATENCY] = min;
-    msg_stats[TOTAL_MSGS] += 1.0;
-  }
-#endif
 
   for(int i=CkNodeFirst(CkMyNode()); i < CkNodeFirst(CkMyNode())+CkNodeSize(0);i++) {
     HTramMessage* tmpMsg = (HTramMessage*)CkReferenceMsg(agg_message);
@@ -497,25 +584,6 @@ void HTramRecv::receive_no_sort(HTramMessage* agg_message) {
 
 //#elif defined PER_DESTPE_BUFFER
 void HTram::receiveOnPE(HTramMessage* msg) {
-//    CkPrintf("\ntotal_latency=%lfs",total_latency);
-#if 0
-  if(msg->do_timer) {
-    double time_stamp = CkWallTimer();
-    double latency[2];
-    for(int i=0;i<2;i++) {
-      latency[i] = time_stamp - msg->timer[i];
-      msg_stats[TOTAL_LATENCY] += latency[i];
-    }
-    double max = std::max(latency[0], latency[1]);
-    if(msg_stats[MAX_LATENCY] < max)
-      msg_stats[MAX_LATENCY] = max;
-    double min = std::min(latency[0], latency[1]);
-    if(msg_stats[MIN_LATENCY] > min)
-      msg_stats[MIN_LATENCY] = min;
-    msg_stats[TOTAL_MSGS] += 1;
-  }
-#endif
-
 //  CkPrintf("\nrcv-msg size = %d", msg->next);
   for(int i=0;i<msg->next;i++)
     cb(objPtr, msg->buffer[i].payload);
@@ -523,26 +591,24 @@ void HTram::receiveOnPE(HTramMessage* msg) {
 }
 
 void HTramRecv::receive(HTramMessage* agg_message) {
-#if 0
-//  CkPrintf("\nReceived msg of size %d on node%d", agg_message->next, thisIndex);
-  if(agg_message->do_timer) {
-    double time_stamp = CkWallTimer();
-    double latency[2];
-    for(int i=0;i<2;i++) {
-      latency[i] = time_stamp - agg_message->timer[i];
-//      if(latency[i] > 0.1) CkPrintf("\nlatency = %lfs (%lf - %lf)", latency[i], time_stamp, agg_message->timer[i]);
-      msg_stats[TOTAL_LATENCY] += latency[i];
-    } 
-    double max = std::max(latency[0], latency[1]);
-    if(msg_stats[MAX_LATENCY] < max)
-      msg_stats[MAX_LATENCY] = max;
-    double min = std::min(latency[0], latency[1]);
-    if(msg_stats[MIN_LATENCY] > min)
-      msg_stats[MIN_LATENCY] = min;
-    msg_stats[TOTAL_MSGS] += 1;
+//  for(int i=0;i<agg_message->next;i++)
+//    CkPrintf("\n[Node-%d]Receiving item %d", CkMyNode(), agg_message->buffer[i].payload);
+  //track the number of messages received from this PE,that you haven't acked
+#if 1
+  msgs_received_from[agg_message->srcPe]++;
+  int src_node = agg_message->srcPe/CkNodeSize(0);
+#endif
+#if 1
+  for(int k=0;k<CkNodeSize(0);k++) {
+    if(agg_message->ack_count[k]) {
+      msgs_in_transit[k*CkNumNodes()+src_node] -= agg_message->ack_count[k];
+      if(msgs_in_transit[k*CkNumNodes()+src_node].load() < _K)
+        tram_proxy[k+thisIndex*CkNodeSize(0)].releaseMessages();
+ //     CkPrintf("\n[PE-%d] Reducing msg_in_transit(to)[%d] from %d to %d", CkMyPe(), src_node, msgs_in_transit[k*CkNumNodes()+src_node].load()+agg_message->ack_count[k], msgs_in_transit[k*CkNumNodes()+src_node].load());
+    }
   }
 #endif
-  
+
   //broadcast to each PE and decr refcount
   //nodegroup //reference from group
   int rank0PE = CkNodeFirst(thisIndex);
