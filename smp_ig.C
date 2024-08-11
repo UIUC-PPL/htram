@@ -102,8 +102,8 @@ public:
     CkCallback endCb(CkIndex_TestDriver::completeRun(), thisProxy);
    // CkCallback endCb(CkIndex_Updater::checkErrors(), updater_array);
     //updater_array.generateUpdatesVerify();
-    CkStartQD(endCb);
     updater_array.lastFlush();
+    CkStartQD(endCb);
   }
 
   void completeRun() {
@@ -294,7 +294,7 @@ public:
 //      if(i%128==0) tram_req->tflush();
 
         // TODO: Test with something other than % or test with something equal to 2^n
-      if  ((i % 5000) == 4999) CthYield();
+      if  ((i % 2048) == 2047) CthYield();
 //      if(i == l_num_req*0.75) tram_resp->enableIdleFlush();
     }
     //tram_resp->enableIdleFlush();

@@ -1,6 +1,8 @@
 #include "htram_group.h"
-//#define DEBUG 1
+#include <thread>
+#include <mutex>
 
+//#define DEBUG 1
 CkReductionMsg* msgStatsCollection(int nMsg, CkReductionMsg** rdmsgs) {
   double *msg_stats;
   msg_stats = (double*)rdmsgs[0]->getData();
@@ -44,7 +46,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
     if(thisIndex==0) CkPrintf("\nDest-node side grouping/sorting enabled (1 buffer per src-pe, per dest-node)\n");
 */
   ret_list = !ret_item;
-  agg = PNs;//NNs;//PP;
+  agg = PNs;//PP; NNs;
   myPE = CkMyPe();
   msgBuffers = (new HTramMessage*[CkNumPes()]);
 
@@ -244,8 +246,9 @@ void HTram::registercb() {
   CcdCallFnAfter(periodic_tflush, (void *) this, flush_time);
 }
 
-void HTram::copyToNodeBuf(int destnode, int increment) {
+std::mutex node_mutex;
 
+void HTram::copyToNodeBuf(int destnode, int increment) {
 // Get atomic index
   int idx = srcNodeGrp->get_idx[destnode].fetch_add(increment, std::memory_order_relaxed);
   while(idx >= BUFSIZE) {
@@ -256,14 +259,34 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
     srcNodeGrp->msgBuffers[destnode]->getTimer()[idx/(BUFSIZE-increment)] = CkWallTimer();
 #endif
 // Copy data into node buffer from PE-local buffer
+//  node_mutex.lock();
   int i;
   for(i=0;i<increment;i++) {
     srcNodeGrp->msgBuffers[destnode]->buffer[idx+i].payload = local_buf[destnode]->buffer[i].payload;
     srcNodeGrp->msgBuffers[destnode]->buffer[idx+i].destPe = local_buf[destnode]->buffer[i].destPe;
   }
-
   int done_count = srcNodeGrp->done_count[destnode].fetch_add(increment, std::memory_order_relaxed);
+//  node_mutex.unlock();
+
+  std::atomic_store_explicit(&(srcNodeGrp->mailbox_receiver[CkMyRank()+(destnode*CkNodeSize(0))]), (srcNodeGrp->mailbox_receiver[CkMyRank()+(destnode*CkNodeSize(0))])+increment, std::memory_order_release);
+
   if(done_count+increment == BUFSIZE) {
+#if 1
+    int count = 0;
+    while(count < BUFSIZE) {
+      count = 0;
+      for (int i = 0; i < CkNodeSize(0); ++i) {
+//        CkPrintf("\nAccessing idx %d", i+(destnode*CkNodeSize(0)));
+        count += std::atomic_load_explicit(&(srcNodeGrp->mailbox_receiver[i+(destnode*CkNodeSize(0))]), std::memory_order_relaxed);
+//        CkPrintf("\nFor buffer for destnode %d, the count so far is %d", destnode, count);
+        // synchronize with just one writer
+        std::atomic_thread_fence(std::memory_order_acquire);
+      }
+    }
+
+    for (int i = 0; i < CkNodeSize(0); ++i)
+      std::atomic_store_explicit(&(srcNodeGrp->mailbox_receiver[i+(destnode*CkNodeSize(0))]), 0, std::memory_order_relaxed);
+#endif
     agg_msg_count++;
     srcNodeGrp->msgBuffers[destnode]->next = BUFSIZE;
     
@@ -299,11 +322,28 @@ void HTram::tflush(bool idleflush) {
 #if 1
         if(srcNodeGrp->done_count[i]) {
           flush_msg_count++;
+
+
 #if 1
           int idx = srcNodeGrp->get_idx[i].fetch_add(BUFSIZE, std::memory_order_relaxed);
           int done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_relaxed);
           if(idx >= BUFSIZE) continue;
           while(idx!=done_count) { done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_relaxed);}
+#if 1
+          if(done_count == idx) {
+            int count = 0;
+            while(count < done_count) {
+              count = 0;
+              for (int j = 0; j < CkNodeSize(0); ++j) {
+                count += std::atomic_load_explicit(&(srcNodeGrp->mailbox_receiver[j+(i*CkNodeSize(0))]), std::memory_order_relaxed);
+                // synchronize with just one writer
+                std::atomic_thread_fence(std::memory_order_acquire);
+              }
+            }
+            for (int j = 0; j < CkNodeSize(0); ++j)
+              std::atomic_store_explicit(&(srcNodeGrp->mailbox_receiver[j+(i*CkNodeSize(0))]), 0, std::memory_order_relaxed);
+          }
+#endif
 #endif
   //          CkPrintf("\nCalling TFLUSH---\n");
           srcNodeGrp->msgBuffers[i]->next = srcNodeGrp->done_count[i];
@@ -381,6 +421,8 @@ HTramNodeGrp::HTramNodeGrp() {
     get_idx[i] = 0;
     done_count[i] = 0;
   }
+  for(int i=0;i<1024;i++)
+    mailbox_receiver[i] = 0;
 }
 
 HTramNodeGrp::HTramNodeGrp(CkMigrateMessage* msg) {}

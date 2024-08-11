@@ -10,13 +10,17 @@ include Makefile_htram
 
 .PHONY: histo_nonSmp histo_smp
 
-histo_smp: histo.C histo.ci histo.decl.h histo.def.h libhtram_group.a
+histo_smp: histo.C histo.ci histo.decl.h histo.def.h libhtram_group_histo.a
 	$(CHARMC_SMP) histo.ci -DTRAM_SMP -DGROUPBY
-	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY
+	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group_histo.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY -DHISTO
 
-smp_ig: smp_ig.C smp_ig.ci smp_ig.decl.h smp_ig.def.h libhtram_group.a
+ig_smp: smp_ig.C smp_ig.ci smp_ig.decl.h smp_ig.def.h libhtram_group_ig.a
 	$(CHARMC_SMP) smp_ig.ci -DTRAM_SMP -DGROUPBY
-	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY
+	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group_ig.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY -DIG
+
+phold_smp: hello.C hello.ci hello.decl.h hello.def.h libhtram_group_phold.a
+	$(CHARMC_SMP) hello.ci -DTRAM_SMP -DGROUPBY
+	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group_phold.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY -DPHOLD
 # -tracemode projections
 
 histo_nonSmp: histo.C histo.ci histo.decl.h histo.def.h libtramnonsmp.a
@@ -40,6 +44,8 @@ ig_nonSmp: ig_nonSmp.decl.h  ig_nonSmp.def.h tramNonSmp.decl.h libtramnonsmp.a
 
 histo.def.h histo.decl.h: histo.ci.stamp
 
+hello.def.h hello.decl.h: hello.ci.stamp
+
 smp_ig.def.h smp_ig.decl.h: smp_ig.ci.stamp
 
 histo_g.def.h histo_g.decl.h: histo_g.ci.stamp
@@ -56,6 +62,10 @@ smp_ig.ci.stamp: smp_ig.ci
 
 histo_g.ci.stamp: histo.ci
 	$(CHARMC_SMP) $(CHARMCFLAGS) $< -DGROUPBY=1
+	touch $@
+
+hello.ci.stamp: hello.ci
+	$(CHARMC_SMP) $(CHARMCFLAGS) $<
 	touch $@
 
 histo.o: histo.C histo.decl.h histo.def.h

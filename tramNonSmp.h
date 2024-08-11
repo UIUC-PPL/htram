@@ -197,6 +197,8 @@ tramNonSmp<T>::tramNonSmp(CkGroupID gid, int buffer_size_, bool enable_buffer_fl
 
     for (int i = 0; i != CkNumPes(); ++i)
         msgBuffers[i] = make_tram_msg<value_type>(buffer_size);
+
+//    contribute(start_cb);
 }
 
 template <typename T>

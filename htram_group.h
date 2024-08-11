@@ -16,8 +16,7 @@
 #include "packet.h"
 using namespace std;
 #define SIZE_LIST (int[]){1024, 512, 2048}
-#define BUFSIZE 1024//4096//2048//512//1024//256//1024//2048//1024//4096//2048//4096//2048//1024
-//2048//1024//512//1024//1600//512//1600//1024//4096//2048//1024
+#define BUFSIZE 512//1024//512//1024
 #define LOCAL_BUFSIZE 16//8
 #define PPN_COUNT 8
 #define NODE_COUNT 512
@@ -40,10 +39,21 @@ struct item {
   T payload;
 };
 
-//typedef std::pair<int,int> datatype;
-typedef int datatype;
+#ifdef SSSP
+typedef std::pair<int,int> datatype;
+#endif
 
-//typedef packet1 datatype;
+#ifdef HISTO
+typedef int datatype;
+#endif
+
+#ifdef PHOLD
+typedef double datatype;
+#endif
+
+#ifdef IG
+typedef packet1 datatype;
+#endif
 
 typedef item<datatype> itemT;
 
@@ -77,6 +87,8 @@ class HTramNodeGrp : public CBase_HTramNodeGrp {
     std::atomic_int flush_count{0};
     std::atomic_int get_idx[NODE_COUNT];
     std::atomic_int done_count[NODE_COUNT];
+    int num_mailboxes = 8*32;//8ppn * number of nodes
+    std::atomic<int> mailbox_receiver[1024];
 //    HTramMessage
     HTramMessage **msgBuffers;
     HTramNodeGrp();

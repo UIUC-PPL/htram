@@ -83,9 +83,9 @@ public:
 #ifdef TRAM_SMP
     nodeGrpProxy = CProxy_HTramRecv::ckNew();
     srcNodeGrpProxy = CProxy_HTramNodeGrp::ckNew();
-#endif
     CkCallback start_cb(CkReductionTarget(TestDriver, start), driverProxy);
     tram_proxy = tram_proxy_t::ckNew(nodeGrpProxy.ckGetGroupID(), srcNodeGrpProxy.ckGetGroupID(), l_buffer_size, enable_buffer_flushing, static_cast<double>(l_flush_timer)/1000, return_item,true, start_cb);
+#endif
     updater_array = CProxy_Updater::ckNew(tram_proxy.ckGetGroupID(), 42);
     delete args;
   }

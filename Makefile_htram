@@ -11,11 +11,20 @@ tramNonSmp.o : tramNonSmp.C tramNonSmp.def.h tramNonSmp.decl.h
 tramNonSmp.def.h tramNonSmp.decl.h : tramNonSmp.ci
 	$(CHARMC) tramNonSmp.ci
 
-libhtram_group.a: htram_group.o
+libhtram_group_histo.a: CFLAGS = -DHISTO
+libhtram_group_histo.a: htram_group.o
+	$(CHARMC_SMP) $< -o $@ -language charm++ -O3
+
+libhtram_group_ig.a: CFLAGS = -DIG
+libhtram_group_ig.a: htram_group.o
+	$(CHARMC_SMP) $< -o $@ -language charm++ -O3
+
+libhtram_group_phold.a: CFLAGS = -DPHOLD
+libhtram_group_phold.a: htram_group.o
 	$(CHARMC_SMP) $< -o $@ -language charm++ -O3
 
 htram_group.o: htram_group.C htram_group.def.h htram_group.decl.h
-	$(CHARMC_SMP) -c htram_group.C -O3 -fpermissive
+	$(CHARMC_SMP) -c htram_group.C -O3 $(CFLAGS)
 
 htram_group.def.h htram_group.decl.h: htram_group.ci
 	$(CHARMC_SMP) htram_group.ci -O3
