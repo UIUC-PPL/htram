@@ -86,7 +86,7 @@ public:
     CkCallback start_cb(CkReductionTarget(TestDriver, start), driverProxy);
     tram_proxy = tram_proxy_t::ckNew(nodeGrpProxy.ckGetGroupID(), srcNodeGrpProxy.ckGetGroupID(), l_buffer_size, enable_buffer_flushing, static_cast<double>(l_flush_timer)/1000, return_item,true, start_cb);
 #endif
-    updater_array = CProxy_Updater::ckNew(tram_proxy.ckGetGroupID(), 42);
+    updater_array = CProxy_Updater::ckNew(tram_proxy, 42);
     delete args;
   }
 
@@ -127,6 +127,36 @@ public:
   }
 };
 
+/**
+ * generate() {
+
+for (I=0; I<1024; I++)
+  { item = rand() % 1 << 20; (generate a random number between 1 and 2^20.. about a million)
+   bucket - item/ 1 << 14 ; (check the math… bucket should be between 0 and 127)
+   Dest = random pe
+   sendItem to dest (possibly with L additional  bytes of payload) using tram
+ }
+ totalGenerate+ = 1024;
+If (totalGenerated < 1 << 20 ) send a message to yourself to generate next batch.
+    // So each group member generates  about a million messages.
+}
+
+receiveItems(…)
+{
+For each item received:
+   currentWindowValuesSum += item;
+   If (++ currentWindowNumValues == 1024) {
+           save current Window counts in an array. Reset both the counts;
+            I guess we will use 2 numbers for each window in the reduction
+  }
+}
+
+At quiescence, collectStats
+
+collectStats:
+    Reduce the window arrays, print average itemValue for  each window.
+*/
+
 // Chare Array with multiple chares on each PE
 // Each chare: owns a portion of the global table
 //             performs updates on its portion
@@ -139,12 +169,15 @@ private:
   CmiInt8 num_counts;
   tram_proxy_t tram_proxy;
   tram_t* tram;
-  int count;
+  int count, phase, tram_th;
+  double selectivity;
 public:
-  Updater(CkGroupID tram_id, int k) {
+  Updater(tram_proxy_t _tram_proxy, int k) {
     count = 0;
-    tram_proxy = CProxy_HTram(tram_id);
-  
+    phase = 0;
+    tram_th = 127;//16;
+    selectivity = 0.5;//1.0;
+    tram_proxy = _tram_proxy;
     // Compute table start for this chare
     // CkPrintf("[PE%d] Update (thisIndex=%d) created: lnum_counts = %d, l_num_ups =%d\n", CkMyPe(), thisIndex, lnum_counts, l_num_ups);
 
@@ -175,8 +208,9 @@ public:
   Updater(CkMigrateMessage *msg) {}
 
   // Communication library calls this to deliver each randomly generated key
-  inline void insertData(const CmiInt8& key) {
-    counts[key]++;
+  inline void insertData(const DataItem& key) {
+//    CkPrintf("\nkey received = %d", key.col);
+    counts[key.col]++;
 #if 0
     CmiInt8 indx = rand() % num_counts;
     CmiInt8 lindx = indx / CkNumPes();
@@ -188,25 +222,37 @@ public:
   }
 
   inline void insertData2(const CmiInt8& key) {
+//    CkPrintf("\nkey deleted = %d", key);
     counts[key]--;
   }
 
-  static void insertDataCaller(void* p, int key) {
+  inline int getDestProc(DataItem key) {
+    return key.pe;
+  }
+
+  static void insertDataCaller(void* p, DataItem key) {
     ((Updater *)p)->insertData(key);
   }
 
-  static void insertDataArrCaller(void* p, int* keys, int count) {
+  static void insertDataArrCaller(void* p, DataItem* keys, int count) {
     for(int i=0;i<count;i++) {
       ((Updater *)p)->insertData(keys[i]);
     }
   }
 
+  static int getDestProcCaller(void* p, DataItem key) {
+    return ((Updater *)p)->getDestProc(key);
+  }
+
+  static void doneCaller(void* p) {
+  }
+
   void preGenerateUpdates() {
     tram = tram_proxy.ckLocalBranch();
-    tram->set_func_ptr(Updater::insertDataCaller, this);
+    tram->set_func_ptr(Updater::insertDataCaller, Updater::getDestProcCaller, Updater::doneCaller,this, CkCallback(CkReductionTarget(Updater, generateUpdates), thisProxy));
 //    tram->reset_stats(buf_type, buf_size, agtype);
 #ifdef RETURN_ITEMLIST
-    tram->set_func_ptr_retarr(Updater::insertDataArrCaller, this);
+    tram->set_func_ptr_retarr(Updater::insertDataArrCaller, Updater::getDestProcCaller, Updater::doneCaller, this);
 #endif
 
     contribute(CkCallback(CkReductionTarget(TestDriver, start), driverProxy));
@@ -215,17 +261,41 @@ public:
 
   void generateUpdates() {
     // Generate this chare's share of global updates
-    CmiInt8 pe, col;
-
-    for(CmiInt8 i = 0; i < l_num_ups; i++) {
+    CmiInt8 pe, col, bucket;
+    int num_chunks = 10;
+    int chunk = l_num_ups/num_chunks;
+    if(chunk < 100) chunk = l_num_ups;
+    int start = phase*chunk;
+    int end = (phase+1)*chunk;
+    if(end > l_num_ups) return;
+//    CkPrintf("\nUpdates in range %d to %d",start, end);
+    for(CmiInt8 i = start; i < end && i<l_num_ups; i++) {
       col = pckindx[i] >> 16;
       pe  = pckindx[i] & 0xffff;
       // Submit generated key to chare owning that portion of the table
-      tram->insertValue(col, pe);
+      bucket = rand() % (1 << 7);//col/ (1 << 14 );
+//      CkPrintf("\nbucket = %d, col =%d, pe = %d ", bucket, col, pe);
+      DataItem item;
+      item.col = col;
+      item.pe = pe;
+      item.index = i;
+      tram->sendItemPrioDeferredDest(item, bucket);//insertValue(col, pe);
 
-      if  ((i % 2048) == 2047) {/*tram->tflush();*/ CthYield();}
+      if  (i==end-1){//(i % 2048) == 2047) {
+        tram_th = (tram_th+4);
+        tram_th = tram_th<127?tram_th:127;
+        if(i==l_num_ups-1) tram_th = 127;
+        selectivity += 1.0;
+        tram->changeThreshold(1, tram_th, selectivity); /*tram->tflush();*/
+        tram->tflush();
+        tram->printBucketStats(phase);
+        phase++;
+        CthYield();
+        return;
+      }
     }
-    tram->tflush();
+//    tram->tflush();
+//    tram->printBucketStats();
   }
 
   void generateUpdatesVerify() {

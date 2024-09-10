@@ -5,6 +5,9 @@ module htram_group{
   initnode void registerMsgStatsCollection(void);
   message HTramMessage {
     int next;
+//    int track_count;
+//    int srcPe;
+//    int ack_count;
     itemT *buffer;
   };
 
@@ -26,6 +29,12 @@ module htram_group{
     entry [expedited] void receiveOnPE(HTramMessage* msg);
     entry void receivePerPE(HTramNodeMessage*);
     entry void stop_periodic_flush();
+    entry void sanityCheck();
+    entry [reductiontarget] void getTotSendCount(int);
+    entry [reductiontarget] void getTotRecvCount(int);
+    entry [reductiontarget] void getTotTramHCount(int);
+    entry [reductiontarget] void sumBucketStats(int results[n], int n);
+    entry void reset_stats0();
   };
 
   nodegroup HTramNodeGrp {
@@ -35,7 +44,7 @@ module htram_group{
   nodegroup HTramRecv {
     entry HTramRecv();
     entry [expedited] void receive(HTramMessage*);
-    entry [expedited] void receive_no_sort(HTramMessage*);
+    entry void receive_no_sort(HTramMessage*);
     entry void receive_small(HTramLocalMessage*);
     entry void avgLatency(CkCallback cb);
   }

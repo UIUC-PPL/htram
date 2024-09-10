@@ -8,18 +8,26 @@
 #ifdef IDLE_FLUSH
 #define PARTIAL_FLUSH 0.2
 #endif
+#define _K 40
 #define ALL_BUF_TYPES
+#include <queue>
 #include "htram_group.decl.h"
-/* readonly */ extern CProxy_HTram tram_proxy;
+#include "data_struct.h"
+//#include "weighted_node_struct.h"
+///* readonly */ extern CProxy_HTram tram_proxy;
 ///* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
 ///* readonly */ extern CProxy_HTramNodeGrp srcNodeGrpProxy;
-#include "packet.h"
+//#include "packet.h"
 using namespace std;
 #define SIZE_LIST (int[]){1024, 512, 2048}
-#define BUFSIZE 512//1024//512//1024
-#define LOCAL_BUFSIZE 16//8
+#define BUFSIZE 256//512//256////64//512//64//256//64//512//4096//2048//512//1024//256//1024//2048//1024//4096//2048//4096//2048//1024
+//2048//1024//512//1024//1600//512//1600//1024//4096//2048//1024
+#define LOCAL_BUFSIZE 32//8
 #define PPN_COUNT 8
 #define NODE_COUNT 512
+
+#define BUCKETS_BY_DEST
+//#define DEBUG
 
 #define TOTAL_LATENCY 0
 #define MAX_LATENCY 1
@@ -39,27 +47,27 @@ struct item {
   T payload;
 };
 
-#ifdef SSSP
-typedef std::pair<int,int> datatype;
-#endif
+//typedef Update datatype;
+//typedef int datatype;
+typedef DataItem datatype;
 
-#ifdef HISTO
-typedef int datatype;
-#endif
+//typedef packet1 datatype;
 
-#ifdef PHOLD
-typedef double datatype;
-#endif
-
-#ifdef IG
-typedef packet1 datatype;
-#endif
+typedef std::queue<datatype>** array2d_of_queues;
 
 typedef item<datatype> itemT;
 
 class HTramMessage : public CMessage_HTramMessage {
   public:
+    HTramMessage() {next = 0;}
+    HTramMessage(HTramMessage *copy) {
+      next = copy->next;
+      std::copy(copy->buffer, copy->buffer+next, buffer);
+    }
     int next{0}; //next available slot in buffer
+//    int track_count{0};
+//    int srcPe{-1};
+//    int ack_count{0};
     itemT buffer[BUFSIZE];
 };
 
@@ -87,8 +95,6 @@ class HTramNodeGrp : public CBase_HTramNodeGrp {
     std::atomic_int flush_count{0};
     std::atomic_int get_idx[NODE_COUNT];
     std::atomic_int done_count[NODE_COUNT];
-    int num_mailboxes = 8*32;//8ppn * number of nodes
-    std::atomic<int> mailbox_receiver[1024];
 //    HTramMessage
     HTramMessage **msgBuffers;
     HTramNodeGrp();
@@ -97,6 +103,8 @@ class HTramNodeGrp : public CBase_HTramNodeGrp {
 
 typedef void (*callback_function)(void*, datatype);
 typedef void (*callback_function_retarr)(void*, datatype*, int);
+typedef int (*destproc_function)(void*, datatype);
+typedef void (*end_function)(void*);
 
 class HTram : public CBase_HTram {
   HTram_SDAG_CODE
@@ -104,18 +112,36 @@ class HTram : public CBase_HTram {
   private:
     callback_function cb;
     callback_function_retarr cb_retarr;
+    destproc_function get_dest_proc;
+    end_function tram_done;
     CkGroupID client_gid;
     CProxy_HTramRecv nodeGrpProxy;
     CProxy_HTramNodeGrp srcNodeGrpProxy;
     CkCallback endCb;
-    CkCallback return_cb;
+    CkCallback return_cb, next_batch_cb;
     int myPE, buf_type;
     int agg;
+    int local_recv_count, tot_recv_count, tot_send_count, local_updates;
+    int histo_bucket_count, direct_threshold=0, tram_threshold = 0;//, updates_in_tram=0,largest_seen_tram_threshold=0;
+    int num_nodes;
+    float selectivity = 1.0;
+    int est_total_items_in_bucket_arr;
     bool ret_list;
     bool request;
     double flush_time;
     double msg_stats[STATS_COUNT] {0.0};
     int local_idx[NODE_COUNT];
+#ifdef BUCKETS_BY_DEST
+    int* updates_in_tram;
+#else
+    int updates_in_tram_count=0;
+#endif
+    int *bucket_stats;
+#ifdef BUCKETS_BY_DEST
+    array2d_of_queues tram_hold;
+#else
+    std::queue<datatype> *tram_hold;
+#endif
     void* objPtr;
     HTramNodeGrp* srcNodeGrp;
     HTramRecv* nodeGrp;
@@ -124,23 +150,48 @@ class HTram : public CBase_HTram {
     HTramLocalMessage **local_buf;
     HTramMessage *localMsgBuffer;
     std::vector<itemT>* localBuffers;
+#if 0
+    std::vector<std::vector<HTramMessage*>> overflowBuffers;
+#endif
+    std::vector<std::vector<HTramMessage*>> fillerOverflowBuffers;
+    std::vector<std::vector<int>> fillerOverflowBuffersBucketMin;
+    std::vector<std::vector<int>> fillerOverflowBuffersBucketMax;
   public:
     bool enable_flush;
     int bufSize;
     int prevBufSize;
     int agg_msg_count;
     int flush_msg_count;
+    int phase;
+    double timer;
     HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enable_timed_flushing, double flush_timer, bool ret_item, bool req, CkCallback start_cb);
     HTram(CkGroupID gid, CkCallback cb);
     HTram(CkMigrateMessage* msg);
     void set_func_ptr(void (*func)(void*, datatype), void*);
-    void set_func_ptr_retarr(void (*func)(void*, datatype*, int), void*);
+    void set_func_ptr(void (*func)(void*, datatype), int (*func2)(void*, datatype), void (*func3)(void*), void*, CkCallback);
+    void set_func_ptr_retarr(void (*func)(void*, datatype*, int), int (*func2)(void*, datatype), void (*func3)(void*), void*);
     int getAggregatingPE(int dest_pe);
     void copyToNodeBuf(int destnode, int increment);
     void insertValue(datatype send_value, int dest_pe);
+    void sendItemPrioDeferredDest(datatype new_update, int neighbor_bucket);
     void reset_stats(int buf_type, int buf_size, int agtype);
+    void sumBucketStats(int* results, int n);
+    void reset_stats0();
     void enableIdleFlush();
     void tflush(bool idleflush=false);
+    void flush_everything();
+    void printBucketStats(int _phase);
+    void shareArrayOfBuckets(std::vector<datatype> *new_tram_hold, int bucket_count);
+#ifdef BUCKETS_BY_DEST 
+    void insertBucketsByDest(int, int);
+#else
+    void insertBuckets(int);
+#endif
+    void changeThreshold(int, int, float);
+    void sanityCheck();
+    void getTotSendCount(int);
+    void getTotRecvCount(int);
+    void getTotTramHCount(int);
     bool idleFlush();
     void avgLatency(CkCallback cb);
 //#ifdef SRC_GROUPING
