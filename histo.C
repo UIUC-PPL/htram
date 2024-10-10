@@ -7,6 +7,7 @@ typedef CmiUInt8 dtype;
 #include <assert.h>
 #define SIZES 3
 #define PHASE_COUNT 1//12
+#define RETURN_ITEMLIST
 // Handle to the test driver (chare)
 CProxy_TestDriver driverProxy;
 
@@ -15,7 +16,7 @@ int lnum_counts = 1000;       // per thread size of the table
 int l_buffer_size = 1024;
 bool enable_buffer_flushing = false;
 int l_flush_timer = 500;
-bool return_item = true;
+bool return_item = false;//true;
 
 #ifdef TRAM_SMP
 #if GROUPBY

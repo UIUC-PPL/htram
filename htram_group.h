@@ -138,6 +138,7 @@ class HTram : public CBase_HTram {
     int getAggregatingPE(int dest_pe);
     void copyToNodeBuf(int destnode, int increment);
     void insertValue(datatype send_value, int dest_pe);
+    void insertToProcess(datatype item, int logicNodeNum);
     void reset_stats(int buf_type, int buf_size, int agtype);
     void enableIdleFlush();
     void tflush(bool idleflush=false);
@@ -159,15 +160,20 @@ class HTram : public CBase_HTram {
 class HTramRecv : public CBase_HTramRecv {
   HTramRecv_SDAG_CODE
     CkCallback return_cb;
+    callback_function_retarr cb_retarr;
+    void* objPtr;
+
   public:
     CProxy_HTram tram_proxy;
     double msg_stats[STATS_COUNT] {0.0};
     HTramRecv();
     HTramRecv(CkMigrateMessage* msg);
     void setTramProxy(CkGroupID);
+    void set_func_ptr_retarr(void (*func)(void*, datatype*, int), void*);
+    
 //#ifndef PER_DESTPE_BUFFER
     void receive(HTramMessage*);
-
+    void receiveOnProc(HTramMessage*);
     void receive_no_sort(HTramMessage*);
     void receive_small(HTramLocalMessage*);
     void avgLatency(CkCallback cb);

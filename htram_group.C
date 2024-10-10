@@ -155,12 +155,29 @@ void HTram::set_func_ptr(void (*func)(void*, datatype), void* obPtr) {
 void HTram::set_func_ptr_retarr(void (*func)(void*, datatype*, int), void* obPtr) {
   cb_retarr = func;
   objPtr = obPtr;
+  if(CkMyRank()==0)
+    nodeGrp->set_func_ptr_retarr(func, obPtr);
+}
+
+void HTramRecv::set_func_ptr_retarr(void (*func)(void*, datatype*, int), void* obPtr) {
+  cb_retarr = func;
+  objPtr = obPtr;
 }
 
 HTram::HTram(CkMigrateMessage* msg) {}
 
 //one per node, message, fixed 
 //Client inserts
+void HTram::insertToProcess(datatype value, int destNode){
+  HTramMessage *destMsg = msgBuffers[destNode];
+  destMsg->buffer[destMsg->next].payload = value;
+  destMsg->next++;
+  if(destMsg->next == BUFSIZE) {
+    nodeGrpProxy[destNode].receiveOnProc(destMsg);
+    msgBuffers[destNode] = new HTramMessage();
+  }
+
+}
 void HTram::insertValue(datatype value, int dest_pe) {
 //  CkPrintf("\nInserting on PE-%d", dest_pe);
   int destNode = dest_pe/CkNodeSize(0); //find safer way to find dest node,
@@ -516,6 +533,13 @@ void HTram::receiveOnPE(HTramMessage* msg) {
   delete msg;
 }
 
+void HTramRecv::receiveOnProc(HTramMessage* agg_message) {
+  datatype* buf = new datatype[agg_message->next];
+  for(int i=0;i<agg_message->next;i++)
+    buf[i] = agg_message->buffer[i].payload;
+  cb_retarr(objPtr, buf, agg_message->next);
+  delete agg_message;
+}
 void HTramRecv::receive(HTramMessage* agg_message) {
 #if 0
 //  CkPrintf("\nReceived msg of size %d on node%d", agg_message->next, thisIndex);
