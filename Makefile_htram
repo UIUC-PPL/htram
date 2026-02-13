@@ -23,6 +23,10 @@ libhtram_group_phold.a: CFLAGS = -DPHOLD
 libhtram_group_phold.a: htram_group.o
 	$(CHARMC_SMP) $< -o $@ -language charm++ -O3
 
+libhtram_group_unionfind.a: CFLAGS = -DUNIONFIND
+libhtram_group_unionfind.a: htram_group.o
+	$(CHARMC_SMP) $< -o $@ -language charm++ -O3
+
 htram_group.o: htram_group.C htram_group.def.h htram_group.decl.h
 	$(CHARMC_SMP) -c htram_group.C -O3 $(CFLAGS)
 
@@ -35,5 +39,5 @@ test-driver: all
 clean-libs:
 	rm -f *.def.h *.decl.h
 	rm -f *.log.gz *.projrc *.topo *.sts *.sum
-	rm libhtram.a libtramnonsmp.a
+	rm -f *.a
 

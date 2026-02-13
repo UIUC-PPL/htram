@@ -118,7 +118,7 @@ public:
 
 
   void reportErrors(CmiInt8 globalNumErrors) {
-    CkPrintf("Found %" PRId64 " errors in %" PRId64 " locations (%s).\n", globalNumErrors,
+    CkPrintf("Found %lld errors in %d locations (%s).\n", globalNumErrors,
              lnum_counts*CkNumPes(), globalNumErrors == 0 ?
              "passed" : "failed");
 //    start();
@@ -250,7 +250,7 @@ public:
       if(counts[i] != 0L) {
         numErrors++;
         if(numErrors < 5)  // print first five errors, report number of errors below
-          fprintf(stderr,"ERROR: Thread %d error at %ld (= %ld)\n", CkMyPe(), i, counts[i]);
+          fprintf(stderr,"ERROR: Thread %d error at %lld (= %lld)\n", CkMyPe(), i, counts[i]);
       }
     }
 #endif

@@ -1,5 +1,5 @@
 CHARMC =../../../ofi-linux-x86_64-cxi-slurmpmi2cray/bin/charmc $(OPTS)
-CHARMC_SMP =../../../ofi-linux-x86_64-cxi-slurmpmi2cray-smp/bin/charmc $(OPTS)
+CHARMC_SMP = /Users/ritvik/clean_charm/charm/bin/charmc $(OPTS)
 
 CHARMCFLAGS = $(OPTS) -O3
 
@@ -21,7 +21,8 @@ ig_smp: smp_ig.C smp_ig.ci smp_ig.decl.h smp_ig.def.h libhtram_group_ig.a
 phold_smp: hello.C hello.ci hello.decl.h hello.def.h libhtram_group_phold.a
 	$(CHARMC_SMP) hello.ci -DTRAM_SMP -DGROUPBY
 	$(CHARMC_SMP) $(CHARMCFLAGS) libhtram_group_phold.a -language charm++ -o $@ $< -std=c++1z -DTRAM_SMP -DGROUPBY -DPHOLD
-# -tracemode projections
+
+unionfind_smp: libhtram_group_unionfind.a
 
 histo_nonSmp: histo.C histo.ci histo.decl.h histo.def.h libtramnonsmp.a
 	$(CHARMC) histo.ci -DTRAM_NON_SMP
@@ -94,6 +95,4 @@ non-smp-run:
 clean:
 	$(MAKE) clean-libs
 	rm -f *.o *.decl.h *.def.h $(BINARY) charmrun* *.stamp
-	rm histo_nonsmp
-	rm histo_smp
 

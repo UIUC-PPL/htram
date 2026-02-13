@@ -55,6 +55,13 @@ typedef double datatype;
 typedef packet1 datatype;
 #endif
 
+#ifdef UNIONFIND
+#include "types.h"
+//change for anchor or not
+//typedef anchorData datatype;
+typedef findBossData datatype;
+#endif
+
 typedef item<datatype> itemT;
 
 class HTramMessage : public CMessage_HTramMessage {
