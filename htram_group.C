@@ -51,10 +51,10 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
   msgBuffers = (new HTramMessage*[CkNumPes()]);
 
   if(thisIndex == 0) {
-    if(agg == PNs) CkPrintf("\nAggregation type: PNs with buffer size %d", BUFSIZE);
-    else if(agg == NNs) CkPrintf("\nAggregation type: NNs with buffer size %d",BUFSIZE);
-    else if(agg == PP) CkPrintf("\nAggregation type: PP with buffer size %d", BUFSIZE);
-    else if(agg == PsN)  CkPrintf("\nAggregation type: PsN with buffer size %d", BUFSIZE);
+    if(agg == PNs) CkPrintf("\nAggregation type: PNs with buffer size %d\n", BUFSIZE);
+    else if(agg == NNs) CkPrintf("\nAggregation type: NNs with buffer size %d\n",BUFSIZE);
+    else if(agg == PP) CkPrintf("\nAggregation type: PP with buffer size %d\n", BUFSIZE);
+    else if(agg == PsN)  CkPrintf("\nAggregation type: PsN with buffer size %d\n", BUFSIZE);
   }
 
   localMsgBuffer = new HTramMessage();
