@@ -83,9 +83,9 @@ class HTramLocalMessage : public CMessage_HTramLocalMessage {
 
 class HTramNodeMessage : public CMessage_HTramNodeMessage {
   public:
-    HTramNodeMessage() {}
+    HTramNodeMessage() : offset(CkNodeSize(CkMyNode())) {}
     datatype buffer[BUFSIZE];
-    int offset[PPN_COUNT];
+    std::vector<int> offset;
 };
 
 class HTramNodeGrp : public CBase_HTramNodeGrp {
