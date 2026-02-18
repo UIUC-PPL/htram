@@ -46,15 +46,15 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size, bool enab
     if(thisIndex==0) CkPrintf("\nDest-node side grouping/sorting enabled (1 buffer per src-pe, per dest-node)\n");
 */
   ret_list = !ret_item;
-  agg = PNs;//PP; NNs;
+  agg = WW;//WPs;//WW;//PP;
   myPE = CkMyPe();
   msgBuffers = (new HTramMessage*[CkNumPes()]);
 
   if(thisIndex == 0) {
-    if(agg == PNs) CkPrintf("\nAggregation type: PNs with buffer size %d\n", BUFSIZE);
-    else if(agg == NNs) CkPrintf("\nAggregation type: NNs with buffer size %d\n",BUFSIZE);
+    if(agg == WPs) CkPrintf("\nAggregation type: WPs with buffer size %d\n", BUFSIZE);
+    else if(agg == WsP) CkPrintf("\nAggregation type: WsP with buffer size %d\n",BUFSIZE);
     else if(agg == PP) CkPrintf("\nAggregation type: PP with buffer size %d\n", BUFSIZE);
-    else if(agg == PsN)  CkPrintf("\nAggregation type: PsN with buffer size %d\n", BUFSIZE);
+    else if(agg == WW)  CkPrintf("\nAggregation type: WW with buffer size %d\n", BUFSIZE);
   }
 
   localMsgBuffer = new HTramMessage();
@@ -106,7 +106,7 @@ void HTram::reset_stats(int btype, int buf_size, int agtype) {
   nodeGrp->msg_stats[MIN_LATENCY] = 100.0;
   agg = agtype;
   int buf_count = CkNumNodes();
-  if(agg == PP) buf_count = CkNumPes();
+  if(agg == WW) buf_count = CkNumPes();
   for(int i=0;i<buf_count;i++)
     msgBuffers[i] = new HTramMessage();
 
@@ -183,7 +183,7 @@ void HTram::insertValue(datatype value, int dest_pe) {
   int destNode = dest_pe/CkNodeSize(0); //find safer way to find dest node,
   // node size is not always same
   
-  if(agg == NNs) {
+  if(agg == PP) {
     int increment = 1;
     int idx = -1;
     int idx_dnode = local_idx[destNode];
@@ -204,13 +204,13 @@ void HTram::insertValue(datatype value, int dest_pe) {
   }
   else {
     HTramMessage *destMsg = msgBuffers[destNode];
-    if(agg == PP)
+    if(agg == WW)
       destMsg = msgBuffers[dest_pe];
 
-    if(agg == PsN) {
+    if(agg == WsP) {
       itemT itm = {dest_pe, value};
       localBuffers[dest_pe].push_back(itm);
-    } else if (agg == PP) {//change msg type to not include destPE
+    } else if (agg == WW) {//change msg type to not include destPE
       destMsg->buffer[destMsg->next].payload = value;
     } else {
       destMsg->buffer[destMsg->next].payload = value;
@@ -228,7 +228,7 @@ void HTram::insertValue(datatype value, int dest_pe) {
     destMsg->next++;
     if(destMsg->next == BUFSIZE) {
        agg_msg_count++;
-      if(agg == PsN) {
+      if(agg == WsP) {
         int sz = 0;
         for(int i=0;i<CkNodeSize(0);i++) {
           std::vector<itemT> localMsg = localBuffers[destNode*CkNodeSize(0)+i];
@@ -240,12 +240,12 @@ void HTram::insertValue(datatype value, int dest_pe) {
       }
 //      ((envelope *)UsrToEnv(destMsg))->setUsersize(0);//destMsg->next-20)*4+32);
       int dest_idx = dest_pe;
-      if(agg == PP) {
+      if(agg == WW) {
 //        CkPrintf("\nmsg size = %d", *destMsg->next);
         thisProxy[dest_pe].receiveOnPE(destMsg);
       } else {
           dest_idx = destNode;
-        if(agg == PsN) {
+        if(agg == WsP) {
           nodeGrpProxy[destNode].receive_no_sort(destMsg);
 //          nodeGrpProxy[destNode].receive_no_sort(destMsg);
         } else {
@@ -322,7 +322,7 @@ void HTram::enableIdleFlush() {
 }
 void HTram::tflush(bool idleflush) {
 //    CkPrintf("\nCalling flush on PE-%d", thisIndex); fflush(stdout);
-  if(agg == NNs) {
+  if(agg == PP) {
 #if 1
     int flush_count = srcNodeGrp->flush_count.fetch_add(1, std::memory_order_seq_cst);
     //Send your local buffer
@@ -387,7 +387,7 @@ void HTram::tflush(bool idleflush) {
   }
   else {
     int buf_count = CkNumNodes();
-    if(agg == PP) buf_count = CkNumPes();
+    if(agg == WW) buf_count = CkNumPes();
 
     for(int i=0;i<buf_count;i++) {
 //      if(msgBuffers[i]->next)
@@ -402,7 +402,7 @@ void HTram::tflush(bool idleflush) {
 //        else CkPrintf("\nReg[PE-%d] flushing buf[%d] at %d", CkMyPe(), i, msgBuffers[i]->next);
         HTramMessage *destMsg = msgBuffers[i];
 //        *destMsg->getDoTimer() = 0;
-        if(agg == PsN) {
+        if(agg == WsP) {
           int destNode = i;
           int sz = 0;
           for(int k=0;k<CkNodeSize(0);k++) {
@@ -414,12 +414,12 @@ void HTram::tflush(bool idleflush) {
           }
           nodeGrpProxy[i].receive_no_sort(destMsg);
         }
-        else if(agg == PNs)
+        else if(agg == WPs)
         {
           ((envelope *)UsrToEnv(destMsg))->setUsersize(sizeof(int)+sizeof(envelope)+sizeof(itemT)*(destMsg->next));
 //          nodeGrpProxy[i].receive(destMsg); //todo - Resize only upto next
           nodeGrpProxy[i].receive(destMsg);
-        } else if(agg == PP) {
+        } else if(agg == WW) {
           ((envelope *)UsrToEnv(destMsg))->setUsersize(sizeof(int)+sizeof(envelope)+sizeof(itemT)*destMsg->next);
 //          CkPrintf("\nmsg size = %d", *destMsg->next);
           thisProxy[i].receiveOnPE(destMsg);

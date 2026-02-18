@@ -27,10 +27,17 @@ using namespace std;
 #define TOTAL_MSGS 3
 #define STATS_COUNT 4
 
-#define PNs 0
-#define PsN 1
-#define NNs 2
-#define PP 3
+/**
+ * Aggregation modes:
+  * WPs: per-worker buffer, sorted at destination process
+  * WsP: per-worker buffer, sorted at source
+  * PP: per-process buffer, send to processes
+  * WW: per-worker buffer, send to workers
+ */
+#define WPs 0
+#define WsP 1
+#define PP 2
+#define WW 3
 template <typename T>
 struct item {
 //#if !defined(SRC_GROUPING) && !defined(PER_DESTPE_BUFFER)
