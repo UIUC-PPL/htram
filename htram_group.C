@@ -285,7 +285,8 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
   int done_count = srcNodeGrp->done_count[destnode].fetch_add(increment, std::memory_order_relaxed);
 //  node_mutex.unlock();
 
-  std::atomic_store_explicit(&(srcNodeGrp->mailbox_receiver[CkMyRank()+(destnode*CkNodeSize(0))]), (srcNodeGrp->mailbox_receiver[CkMyRank()+(destnode*CkNodeSize(0))])+increment, std::memory_order_release);
+  srcNodeGrp->mailbox_receiver[CkMyRank()+(destnode*CkNodeSize(0))].fetch_add(
+      increment, std::memory_order_release);
 
   if(done_count+increment == BUFSIZE) {
 #if 1
@@ -294,7 +295,8 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
       count = 0;
       for (int i = 0; i < CkNodeSize(0); ++i) {
 //        CkPrintf("\nAccessing idx %d", i+(destnode*CkNodeSize(0)));
-        count += std::atomic_load_explicit(&(srcNodeGrp->mailbox_receiver[i+(destnode*CkNodeSize(0))]), std::memory_order_relaxed);
+        count += srcNodeGrp->mailbox_receiver[i+(destnode*CkNodeSize(0))].load(
+          std::memory_order_relaxed);
 //        CkPrintf("\nFor buffer for destnode %d, the count so far is %d", destnode, count);
         // synchronize with just one writer
         std::atomic_thread_fence(std::memory_order_acquire);
@@ -302,7 +304,8 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
     }
 
     for (int i = 0; i < CkNodeSize(0); ++i)
-      std::atomic_store_explicit(&(srcNodeGrp->mailbox_receiver[i+(destnode*CkNodeSize(0))]), 0, std::memory_order_relaxed);
+        srcNodeGrp->mailbox_receiver[i+(destnode*CkNodeSize(0))].store(
+          0, std::memory_order_relaxed);
 #endif
     agg_msg_count++;
     srcNodeGrp->msgBuffers[destnode]->next = BUFSIZE;
@@ -352,19 +355,21 @@ void HTram::tflush(bool idleflush) {
             while(count < done_count) {
               count = 0;
               for (int j = 0; j < CkNodeSize(0); ++j) {
-                count += std::atomic_load_explicit(&(srcNodeGrp->mailbox_receiver[j+(i*CkNodeSize(0))]), std::memory_order_relaxed);
+                count += srcNodeGrp->mailbox_receiver[j+(i*CkNodeSize(0))].load(
+                  std::memory_order_relaxed);
                 // synchronize with just one writer
                 std::atomic_thread_fence(std::memory_order_acquire);
               }
             }
             for (int j = 0; j < CkNodeSize(0); ++j)
-              std::atomic_store_explicit(&(srcNodeGrp->mailbox_receiver[j+(i*CkNodeSize(0))]), 0, std::memory_order_relaxed);
+                srcNodeGrp->mailbox_receiver[j+(i*CkNodeSize(0))].store(
+                  0, std::memory_order_relaxed);
           }
 #endif
 #endif
   //          CkPrintf("\nCalling TFLUSH---\n");
           srcNodeGrp->msgBuffers[i]->next = srcNodeGrp->done_count[i];
-          ((envelope *)UsrToEnv(srcNodeGrp->msgBuffers[i]))->setUsersize(sizeof(int)+sizeof(envelope)+sizeof(itemT)*srcNodeGrp->msgBuffers[i]->next);
+          ((envelope *)UsrToEnv(srcNodeGrp->msgBuffers[i]))->setUsersize(sizeof(int)+sizeof(itemT)*srcNodeGrp->msgBuffers[i]->next);
  /* 
           CkPrintf("\n[PE-%d]TF-Sending out data with size = %d", thisIndex, srcNodeGrp->msgBuffers[i]->next);
           for(int j=0;j<srcNodeGrp->msgBuffers[i]->next;j++)
@@ -416,7 +421,7 @@ void HTram::tflush(bool idleflush) {
         }
         else if(agg == WPs)
         {
-          ((envelope *)UsrToEnv(destMsg))->setUsersize(sizeof(int)+sizeof(envelope)+sizeof(itemT)*(destMsg->next));
+          ((envelope *)UsrToEnv(destMsg))->setUsersize(sizeof(int)+sizeof(itemT)*(destMsg->next));
 //          nodeGrpProxy[i].receive(destMsg); //todo - Resize only upto next
           nodeGrpProxy[i].receive(destMsg);
         } else if(agg == WW) {
@@ -438,8 +443,10 @@ HTramNodeGrp::HTramNodeGrp() {
     get_idx[i] = 0;
     done_count[i] = 0;
   }
-  for(int i=0;i<1024;i++)
-    mailbox_receiver[i] = 0;
+  num_mailboxes = CkNumPes();
+  mailbox_receiver.reset(new std::atomic<int>[num_mailboxes]);
+  for(int i=0;i<num_mailboxes;i++)
+    mailbox_receiver[i].store(0, std::memory_order_relaxed);
 }
 
 HTramNodeGrp::HTramNodeGrp(CkMigrateMessage* msg) {}
@@ -528,8 +535,15 @@ void HTram::receiveOnPE(HTramMessage* msg) {
 #endif
 
 //  CkPrintf("\nrcv-msg size = %d", msg->next);
-  for(int i=0;i<msg->next;i++)
-    cb(objPtr, msg->buffer[i].payload);
+  if(!ret_list) {
+    for(int i=0;i<msg->next;i++)
+      cb(objPtr, msg->buffer[i].payload);
+  } else {
+    datatype* buf = new datatype[msg->next];
+    for(int i=0;i<msg->next;i++)
+      buf[i] = msg->buffer[i].payload;
+    cb_retarr(objPtr, buf, msg->next);
+  }
   delete msg;
 }
 

@@ -14,6 +14,7 @@
 ///* readonly */ extern CProxy_HTramRecv nodeGrpProxy;
 ///* readonly */ extern CProxy_HTramNodeGrp srcNodeGrpProxy;
 #include "packet.h"
+#include <memory>
 using namespace std;
 #define SIZE_LIST (int[]){1024, 512, 2048}
 #define BUFSIZE 512//1024//512//1024
@@ -101,8 +102,8 @@ class HTramNodeGrp : public CBase_HTramNodeGrp {
     std::atomic_int flush_count{0};
     std::atomic_int get_idx[NODE_COUNT];
     std::atomic_int done_count[NODE_COUNT];
-    int num_mailboxes = 8*32;//8ppn * number of nodes
-    std::atomic<int> mailbox_receiver[1024];
+    int num_mailboxes = 0;
+    std::unique_ptr<std::atomic<int>[]> mailbox_receiver;
 //    HTramMessage
     HTramMessage **msgBuffers;
     HTramNodeGrp();
