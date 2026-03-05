@@ -27,11 +27,23 @@ libhtram_group_unionfind.a: CFLAGS = -DUNIONFIND
 libhtram_group_unionfind.a: htram_group.o
 	$(CHARMC_SMP) $< -o $@ -language charm++ -O3
 
+# GRAPH_INCLUDE must point to the directory containing weighted_node_struct.h
+# (i.e. the charm_graph_code directory).  Pass it on the make command line:
+#   make libhtram_group_graph.a GRAPH_INCLUDE=/path/to/charm_graph_code
+GRAPH_INCLUDE ?= .
+libhtram_group_graph.a: CFLAGS = -DGRAPH -DBUCKETS_BY_DEST -DADD_FILLERS -I$(GRAPH_INCLUDE) -DHTRAM_GRAPH_TYPES_HEADER=\"$(GRAPH_INCLUDE)/weighted_node_struct.h\"
+libhtram_group_graph.a: htram_group.o
+	$(CHARMC_SMP) $(CHARMCFLAGS) $< -o $@ -language charm++
+
 htram_group.o: htram_group.C htram_group.def.h htram_group.decl.h
 	$(CHARMC_SMP) -c htram_group.C -O3 $(CFLAGS)
 
 htram_group.def.h htram_group.decl.h: htram_group.ci
-	$(CHARMC_SMP) htram_group.ci -O3
+	$(CHARMC_SMP) htram_group.ci -O3 $(CFLAGS)
+
+# Convenience alias used by the main htram Makefile
+libhtram_group.a: libhtram_group_unionfind.a
+	cp libhtram_group_unionfind.a libhtram_group.a
 
 test-driver: all
 	./charmrun +p16 ./driver  ++local +setcpuaffinity ++ppn 4
@@ -40,4 +52,3 @@ clean-libs:
 	rm -f *.def.h *.decl.h
 	rm -f *.log.gz *.projrc *.topo *.sts *.sum
 	rm -f *.a
-
