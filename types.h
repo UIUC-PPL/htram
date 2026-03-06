@@ -7,12 +7,14 @@ struct findBossData {
     uint64_t partnerOrBossID;
     uint64_t senderID;
     uint64_t isFBOne;
+    uint64_t targetChareIdx;
 
     void pup(PUP::er &p) {
         p|arrIdx;
         p|partnerOrBossID;
         p|senderID;
         p|isFBOne;
+        p|targetChareIdx;
     }
 };
 
@@ -20,10 +22,12 @@ struct findBossData {
 struct anchorData {
     uint64_t arrIdx;
     uint64_t v;
+    uint64_t targetChareIdx;
 
     void pup(PUP::er &p) {
         p|arrIdx;
         p|v;
+        p|targetChareIdx;
     }
 };
 #endif
