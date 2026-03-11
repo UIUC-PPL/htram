@@ -671,7 +671,9 @@ void HTram::tflush(bool idleflush) {
 #endif
 }
 
-void HTram::flush_everything() {}
+void HTram::flush_everything() {
+  tflush();
+}
 
 HTramNodeGrp::HTramNodeGrp() {
   msgBuffers = new HTramMessage *[CkNumNodes()];
