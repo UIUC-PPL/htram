@@ -48,7 +48,7 @@ typedef std::queue<datatype>** array2d_of_queues;
 #include <memory>
 using namespace std;
 #define SIZE_LIST (int[]){1024, 512, 2048}
-#define BUFSIZE 512
+#define BUFSIZE 1048576 //max num of items allocated in a buffer
 #define LOCAL_BUFSIZE 16
 #define NODE_COUNT 512
 
@@ -181,6 +181,7 @@ class HTram : public CBase_HTram {
           bool req, CkCallback start_cb);
     HTram(CkGroupID gid, CkCallback cb);
     HTram(CkMigrateMessage *msg);
+    void setBufferSize(int new_size);
     void set_func_ptr(void (*func)(void *, datatype), void *);
     // 2-arg form used by UNIONFIND/paratreet
     void set_func_ptr_retarr(void (*func)(void *, datatype *, int), void *);

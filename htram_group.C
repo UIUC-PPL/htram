@@ -48,6 +48,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
   local_updates = 0;
   num_nodes = CkNumNodes();
   ret_list = !ret_item;
+  bufSize = BUFSIZE; //set bufSize to BUFSIZE by default
 
 #ifdef BUCKETS_BY_DEST
   nodesize = CkNodeSize(0);
@@ -119,6 +120,11 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
   CkCallWhenIdle(CkIndex_HTram::idleFlush(), this);
 #endif
   contribute(start_cb);
+}
+
+void HTram::setBufferSize(int new_size) {
+  CkAssert(new_size > 0 && new_size <= BUFSIZE);
+  bufSize = new_size;
 }
 
 bool HTram::idleFlush() {
@@ -225,7 +231,7 @@ void HTram::changeThreshold(int _directThreshold, int _newtramThreshold,
   direct_threshold = _directThreshold;
   selectivity = _selectivity;
   for (int dest_node = 0; dest_node < num_dest; dest_node++)
-    if (updates_in_tram[dest_node] > selectivity * BUFSIZE)
+    if (updates_in_tram[dest_node] > selectivity * bufSize)
       insertBucketsByDest(tram_threshold, dest_node);
 }
 #else
@@ -244,7 +250,7 @@ void HTram::changeThreshold(int _directThreshold, int _newtramThreshold,
   tram_threshold = _newtramThreshold;
   direct_threshold = _directThreshold;
   selectivity = _selectivity;
-  if (updates_in_tram_count > selectivity * BUFSIZE * CkNumNodes())
+  if (updates_in_tram_count > selectivity * bufSize * CkNumNodes())
     insertBuckets(tram_threshold);
 }
 #endif
@@ -272,7 +278,7 @@ void HTram::sendItemPrioDeferredDest(datatype new_update, int neighbor_bucket) {
       insertValueWPs(new_update, dest_proc);
     }
   }
-  if (updates_in_tram[dest_node] > selectivity * BUFSIZE)
+  if (updates_in_tram[dest_node] > selectivity * bufSize)
     insertBucketsByDest(tram_threshold, dest_node);
 }
 #else
@@ -288,7 +294,7 @@ void HTram::sendItemPrioDeferredDest(datatype new_update, int neighbor_bucket) {
     } else
       insertValueWPs(new_update, dest_proc);
   }
-  if (updates_in_tram_count > selectivity * BUFSIZE * num_nodes)
+  if (updates_in_tram_count > selectivity * bufSize * num_nodes)
     insertBuckets(tram_threshold);
 }
 #endif
@@ -304,7 +310,7 @@ void HTram::insertBucketsByDest(int high, int dest_node) {
       int dest_proc = get_dest_proc(objPtr, item);
       destMsg->buffer[destMsg->next].destPe = dest_proc;
       destMsg->next++;
-      if (destMsg->next == BUFSIZE) {
+      if (destMsg->next == bufSize) {
         tot_send_count += destMsg->next;
         updates_in_tram[dest_node] -= destMsg->next;
         if (agg == WW)
@@ -314,7 +320,7 @@ void HTram::insertBucketsByDest(int high, int dest_node) {
         msgBuffers[dest_node] = new HTramMessage();
         destMsg = msgBuffers[dest_node];
       }
-      if (updates_in_tram[dest_node] < selectivity * BUFSIZE)
+      if (updates_in_tram[dest_node] < selectivity * bufSize)
         break;
     }
   }
@@ -332,13 +338,13 @@ void HTram::insertBuckets(int high) {
       destMsg->buffer[destMsg->next].payload = item;
       destMsg->buffer[destMsg->next].destPe = dest_proc;
       destMsg->next++;
-      if (destMsg->next == BUFSIZE) {
+      if (destMsg->next == bufSize) {
         tot_send_count += destMsg->next;
         updates_in_tram_count -= destMsg->next;
         nodeGrpProxy[dest_node].receive(destMsg);
         msgBuffers[dest_node] = new HTramMessage();
       }
-      if (updates_in_tram_count < selectivity * BUFSIZE * num_nodes)
+      if (updates_in_tram_count < selectivity * bufSize * num_nodes)
         break;
     }
   }
@@ -354,7 +360,7 @@ void HTram::insertValueWPs(datatype value, int dest_pe) {
   destMsg->buffer[destMsg->next].payload = value;
   destMsg->buffer[destMsg->next].destPe = dest_pe;
   destMsg->next++;
-  if (destMsg->next == BUFSIZE) {
+  if (destMsg->next == bufSize) {
     agg_msg_count++;
     tot_send_count += destMsg->next;
 #ifdef BUCKETS_BY_DEST
@@ -376,7 +382,7 @@ void HTram::insertToProcess(datatype value, int destNode) {
   HTramMessage *destMsg = msgBuffers[destNode];
   destMsg->buffer[destMsg->next].payload = value;
   destMsg->next++;
-  if (destMsg->next == BUFSIZE) {
+  if (destMsg->next == bufSize) {
     nodeGrpProxy[destNode].receiveOnProc(destMsg);
     msgBuffers[destNode] = new HTramMessage();
   }
@@ -415,7 +421,7 @@ void HTram::insertValue(datatype value, int dest_pe) {
     }
 
     destMsg->next++;
-    if (destMsg->next == BUFSIZE) {
+    if (destMsg->next == bufSize) {
       agg_msg_count++;
       if (agg == WsP) {
         int sz = 0;
@@ -459,7 +465,7 @@ std::mutex node_mutex;
 void HTram::copyToNodeBuf(int destnode, int increment) {
   int idx = srcNodeGrp->get_idx[destnode].fetch_add(increment,
                                                     std::memory_order_relaxed);
-  while (idx >= BUFSIZE) {
+  while (idx >= bufSize) {
     idx = srcNodeGrp->get_idx[destnode].fetch_add(increment,
                                                   std::memory_order_relaxed);
   }
@@ -478,10 +484,10 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
       increment, std::memory_order_release);
 #endif
 
-  if (done_count + increment == BUFSIZE) {
+  if (done_count + increment == bufSize) {
 #ifndef BUCKETS_BY_DEST
     int count = 0;
-    while (count < BUFSIZE) {
+    while (count < bufSize) {
       count = 0;
       for (int i = 0; i < CkNodeSize(CkMyNode()); ++i) {
         count += srcNodeGrp->mailbox_receiver[i + (destnode * CkNodeSize(CkMyNode()))].load(
@@ -494,7 +500,7 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
           0, std::memory_order_relaxed);
 #endif
     agg_msg_count++;
-    srcNodeGrp->msgBuffers[destnode]->next = BUFSIZE;
+    srcNodeGrp->msgBuffers[destnode]->next = bufSize;
     nodeGrpProxy[destnode].receive(srcNodeGrp->msgBuffers[destnode]);
     srcNodeGrp->msgBuffers[destnode] = new HTramMessage();
     srcNodeGrp->done_count[destnode] = 0;
@@ -523,11 +529,11 @@ void HTram::tflush(bool idleflush) {
       for (int i = 0; i < CkNumNodes(); i++) {
         if (srcNodeGrp->done_count[i]) {
           flush_msg_count++;
-          int idx = srcNodeGrp->get_idx[i].fetch_add(BUFSIZE,
+          int idx = srcNodeGrp->get_idx[i].fetch_add(bufSize,
                                                      std::memory_order_relaxed);
           int done_count =
               srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_relaxed);
-          if (idx >= BUFSIZE)
+          if (idx >= bufSize)
             continue;
           while (idx != done_count) {
             done_count = srcNodeGrp->done_count[i].fetch_add(
@@ -568,7 +574,7 @@ void HTram::tflush(bool idleflush) {
 
     for (int i = 0; i < buf_count; i++) {
 #ifdef IDLE_FLUSH
-      if (!idleflush || msgBuffers[i]->next > BUFSIZE * PARTIAL_FLUSH)
+      if (!idleflush || msgBuffers[i]->next > bufSize * PARTIAL_FLUSH)
 #else
       if (!idleflush && msgBuffers[i]->next)
 #endif
@@ -619,7 +625,7 @@ void HTram::tflush(bool idleflush) {
             destMsg->buffer[destMsg->next].payload = item;
             destMsg->buffer[destMsg->next].destPe = dest_proc;
             destMsg->next++;
-            if (destMsg->next == BUFSIZE) {
+            if (destMsg->next == bufSize) {
               tot_send_count += destMsg->next;
               updates_in_tram[dest_node] -= destMsg->next;
               if (agg == WW)
@@ -640,7 +646,7 @@ void HTram::tflush(bool idleflush) {
           continue;
         updates_in_tram[node] -= destMsg->next;
 #ifdef ADD_FILLERS
-        if (destMsg->next < BUFSIZE / 2) {
+        if (destMsg->next < bufSize / 2) {
           for (int i = tram_threshold + 1; i < histo_bucket_count; i++) {
             while (!tram_hold[node][i].empty()) {
               datatype item = tram_hold[node][i].front();
@@ -649,10 +655,10 @@ void HTram::tflush(bool idleflush) {
               destMsg->buffer[destMsg->next].payload = item;
               destMsg->buffer[destMsg->next].destPe = dest_proc;
               destMsg->next++;
-              if (destMsg->next >= BUFSIZE / 2)
+              if (destMsg->next >= bufSize / 2)
                 break;
             }
-            if (destMsg->next >= BUFSIZE / 2)
+            if (destMsg->next >= bufSize / 2)
               break;
           }
         }
