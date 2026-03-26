@@ -681,6 +681,57 @@ void HTram::flush_everything() {
   tflush();
 }
 
+// Called once on PE 0 to initiate htram-aware quiescence.
+// Arms Charm's QD; when it fires (no messages in flight), onQD runs on PE 0.
+void HTram::htramQuiesce(CkCallback cb) {
+  quiesce_cb = cb;
+  CkStartQD(CkCallback(CkIndex_HTram::onQD(), thisProxy[0]));
+}
+
+// Runs on PE 0 when Charm's QD fires.
+// Broadcasts a flush to drain all PE-local buffers into in-flight messages,
+// then arms a second QD to wait for those messages to finish processing.
+void HTram::onQD() {
+  thisProxy.tflush();
+  CkStartQD(CkCallback(CkIndex_HTram::countBuffers(), thisProxy));
+}
+
+// Runs on every PE after the post-flush QD fires.
+// Each PE counts items still sitting in its local buffers and contributes to
+// a sum reduction; if any PE has leftover items, another flush-QD cycle runs.
+void HTram::countBuffers() {
+  int count = 0;
+  if (agg == PP) {
+    for (int i = 0; i < CkNumNodes(); i++) {
+      count += local_idx[i];
+      count += srcNodeGrp->done_count[i].load(std::memory_order_relaxed);
+    }
+  } else {
+    int buf_count = (agg == WW) ? CkNumPes() : CkNumNodes();
+    for (int i = 0; i < buf_count; i++)
+      count += msgBuffers[i]->next;
+  }
+#ifdef BUCKETS_BY_DEST
+  int num_dest = (agg == WW) ? CkNumPes() : CkNumNodes();
+  for (int i = 0; i < num_dest; i++)
+    count += updates_in_tram[i];
+#else
+  count += updates_in_tram_count;
+#endif
+  contribute(sizeof(int), &count, CkReduction::sum_int,
+             CkCallback(CkReductionTarget(HTram, onBufferCount), thisProxy[0]));
+}
+
+// Reduction target on PE 0.
+// If all buffers are empty, fires the user's quiescence callback.
+// Otherwise repeats the flush-QD cycle.
+void HTram::onBufferCount(int total) {
+  if (total == 0)
+    quiesce_cb.send();
+  else
+    CkStartQD(CkCallback(CkIndex_HTram::onQD(), thisProxy[0]));
+}
+
 HTramNodeGrp::HTramNodeGrp() {
   msgBuffers = new HTramMessage *[CkNumNodes()];
   for (int i = 0; i < CkNumNodes(); i++) {

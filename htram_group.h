@@ -139,6 +139,7 @@ class HTram : public CBase_HTram {
     CProxy_HTramNodeGrp srcNodeGrpProxy;
     CkCallback endCb;
     CkCallback return_cb;
+    CkCallback quiesce_cb;
     int myPE, buf_type;
     int agg;
     int tot_recv_count, tot_send_count, local_updates;
@@ -208,6 +209,10 @@ class HTram : public CBase_HTram {
 #endif
     void changeThreshold(int, int, float);
     void sanityCheck();
+    void htramQuiesce(CkCallback cb);
+    void onQD();
+    void countBuffers();
+    void onBufferCount(int total);
     void getTotSendCount(int);
     void getTotRecvCount(int);
     void getTotTramHCount(int);
