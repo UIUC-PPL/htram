@@ -48,7 +48,7 @@ typedef std::queue<datatype>** array2d_of_queues;
 #include <memory>
 using namespace std;
 #define SIZE_LIST (int[]){1024, 512, 2048}
-#define BUFSIZE 1048576 //max num of items allocated in a buffer
+#define BUFSIZE 65536 //max num of items allocated in a buffer
 #define LOCAL_BUFSIZE 16
 #define NODE_COUNT 512
 

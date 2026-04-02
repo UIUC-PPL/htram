@@ -19,6 +19,7 @@ module htram_group{
     entry HTram(CkGroupID, CkGroupID, int, bool, double, bool, bool, CkCallback);
     entry HTram(CkGroupID gid, CkCallback cb);
     entry void avgLatency(CkCallback cb);
+    entry void setBufferSize(int new_size);
     entry void tflush();
     entry void flush_everything();
     entry [whenidle] bool idleFlush();
