@@ -74,7 +74,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
 #else
   nodesize = 0;
   nodeOf = nullptr;
-  agg = WW;
+  agg = WsP;
   tram_hold = nullptr;
 #endif
 
@@ -600,7 +600,7 @@ void HTram::tflush(bool idleflush) {
           msgBuffers[i] = new HTramMessage();
         } else if (agg == WW) {
           ((envelope *)UsrToEnv(destMsg))->setUsersize(
-              sizeof(int) + sizeof(envelope) + sizeof(itemT) * destMsg->next);
+              sizeof(int) + sizeof(itemT) * destMsg->next);
           thisProxy[i].receiveOnPE(destMsg);
           msgBuffers[i] = new HTramMessage();
         }
