@@ -764,14 +764,26 @@ void HTramRecv::receive_no_sort(HTramMessage *agg_message) {
 }
 
 void HTram::receivePerPE(HTramMessage *msg) {
+  int pe = CkMyPe();
+  // Items are pre-sorted by destPe; find this PE's contiguous range.
   int llimit = 0;
-  int rank = CkMyRank();
-  if (rank > 0)
-    llimit = 0;
-  int ulimit = 0;
-  for (int i = llimit; i < ulimit; i++) {
-    cb(objPtr, msg->buffer[i].payload);
+  while (llimit < msg->next && msg->buffer[llimit].destPe < pe)
+    llimit++;
+  int ulimit = llimit;
+  while (ulimit < msg->next && msg->buffer[ulimit].destPe == pe)
+    ulimit++;
+  int count = ulimit - llimit;
+  if (!ret_list) {
+    for (int i = llimit; i < ulimit; i++)
+      cb(objPtr, msg->buffer[i].payload);
+  } else {
+    datatype *buf = new datatype[count];
+    for (int i = 0; i < count; i++)
+      buf[i] = msg->buffer[llimit + i].payload;
+    cb_retarr(objPtr, buf, count);
+    delete[] buf;
   }
+  tot_recv_count += count;
   CkFreeMsg(msg);
 }
 
