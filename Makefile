@@ -1,5 +1,4 @@
-CHARMC =../../../ofi-linux-x86_64-cxi-slurmpmi2cray/bin/charmc $(OPTS)
-CHARMC_SMP = /Users/ritvik/clean_charm/charm/bin/charmc $(OPTS)
+include Makefile.common
 
 CHARMCFLAGS = $(OPTS) -O3
 

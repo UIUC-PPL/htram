@@ -1,0 +1,2 @@
+CHARMC =../../../ofi-linux-x86_64-cxi-slurmpmi2cray/bin/charmc $(OPTS)
+CHARMC_SMP = /home/x-rrao/charm/ucx-linux-x86_64-smp-slurmpmi2/bin/charmc $(OPTS)
