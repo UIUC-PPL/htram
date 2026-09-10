@@ -65,12 +65,19 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
     fillerOverflowBuffersBucketMax.push_back(int_max);
   }
   histo_bucket_count = 2048;
+  // The outer arrays stay at CkNumPes() so that a later reset_stats() can
+  // switch to WW -- where the index is a PE -- without reallocating. Only the
+  // destinations actually in use get rows. Under WPs a row is per node, so
+  // filling CkNumPes() of them allocated CkNodeSize() times too many:
+  // histo_bucket_count queues each, on every PE.
   tram_hold = new std::queue<datatype> *[CkNumPes()];
   updates_in_tram = new int[CkNumPes()];
   for (int i = 0; i < CkNumPes(); i++) {
-    tram_hold[i] = new std::queue<datatype>[histo_bucket_count];
+    tram_hold[i] = nullptr;
     updates_in_tram[i] = 0;
   }
+  for (int i = 0; i < destCount(); i++)
+    tram_hold[i] = new std::queue<datatype>[histo_bucket_count];
 #else
   nodesize = 0;
   nodeOf = nullptr;
@@ -94,7 +101,11 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
   }
 
   localMsgBuffer = new HTramMessage();
+  // Same reasoning: the pointer array is CkNumPes() wide, but an HTramMessage
+  // is ~48 KB, so only the destinations in use are given one.
   for (int i = 0; i < CkNumPes(); i++)
+    msgBuffers[i] = nullptr;
+  for (int i = 0; i < destCount(); i++)
     msgBuffers[i] = new HTramMessage();
 
   localBuffers = new std::vector<itemT>[CkNumPes()];
@@ -140,11 +151,15 @@ void HTram::reset_stats(int btype, int buf_size, int agtype) {
   std::fill_n(nodeGrp->msg_stats, STATS_COUNT, 0.0);
   nodeGrp->msg_stats[MIN_LATENCY] = 100.0;
   agg = agtype;
-  int buf_count = CkNumNodes();
-  if (agg == WW)
-    buf_count = CkNumPes();
-  for (int i = 0; i < buf_count; i++)
+  // agg may have just widened from nodes to PEs, so back-fill anything the
+  // constructor did not allocate before refreshing the buffers.
+  for (int i = 0; i < destCount(); i++) {
+#ifdef BUCKETS_BY_DEST
+    if (tram_hold && !tram_hold[i])
+      tram_hold[i] = new std::queue<datatype>[histo_bucket_count];
+#endif
     msgBuffers[i] = new HTramMessage();
+  }
 }
 
 void HTram::avgLatency(CkCallback cb) {

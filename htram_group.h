@@ -151,6 +151,10 @@ class HTram : public CBase_HTram {
     double flush_time;
     double msg_stats[STATS_COUNT]{0.0};
     int local_idx[NODE_COUNT];
+    // Number of destinations actually in use: nodes under WPs/WsP/PP, PEs
+    // under WW. Per-destination structures are sized by this, not by
+    // CkNumPes(), which over-allocates by the node size in every mode but WW.
+    int destCount() const { return (agg == WW) ? CkNumPes() : CkNumNodes(); }
 #ifdef BUCKETS_BY_DEST
     int *updates_in_tram;
     array2d_of_queues tram_hold;
