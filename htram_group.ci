@@ -1,18 +1,27 @@
 module htram_group{
   initnode void registerMsgStatsCollection(void);
+  // "Type name[]" is the varsize syntax charmc recognizes; "Type *name" is
+  // not, and declaring the latter makes the generated allocator ignore the
+  // sizes argument entirely, so every message is allocated at its full
+  // compile-time capacity. The payload arrays are declared as raw bytes
+  // because the aggregation core is byte-oriented; the C++ classes expose
+  // typed accessors.
   message HTramMessage {
     int next;
-    itemT *buffer;
+    int cap;
+    char buffer[];
   };
 
   message HTramLocalMessage {
-    itemT *buffer;
     int next;
+    int cap;
+    char buffer[];
   };
 
   message HTramNodeMessage {
-    datatype *buffer;
-    int *offset;
+    int noffsets;
+    char buffer[];
+    int offset[];
   };
 
   group HTram {
@@ -31,6 +40,7 @@ module htram_group{
     entry [reductiontarget] void getTotSendCount(int);
     entry [reductiontarget] void getTotRecvCount(int);
     entry [reductiontarget] void getTotTramHCount(int);
+    entry void tramStats(CkCallback cb);
     entry void htramQuiesce(CkCallback cb);
     entry void onQD();
     entry void countBuffers();

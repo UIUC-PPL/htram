@@ -77,33 +77,75 @@ struct item {
 
 typedef item<datatype> itemT;
 
+// The payload of every htram message is a genuine varsize array, declared as
+// raw bytes in the .ci and viewed through a typed accessor here. The generated
+// allocator aligns each varsize field to ALIGN_DEFAULT (16 B), which covers
+// the alignment of any payload type htram carries.
+static_assert(alignof(itemT) <= 16, "itemT alignment exceeds message alignment");
+static_assert(alignof(datatype) <= 16, "datatype alignment exceeds message alignment");
+
 class HTramMessage : public CMessage_HTramMessage {
   public:
-    HTramMessage() { next = 0; }
-    HTramMessage(HTramMessage *copy) {
-      next = copy->next;
-      std::copy(copy->buffer, copy->buffer + next, buffer);
-    }
+    // `cap` is the number of items the varsize array was allocated for. It is
+    // the invariant every fill site relies on: next <= cap, and cap >= bufSize
+    // for any buffer the library will fill.
     int next{0};
-    itemT buffer[BUFSIZE];
+    int cap{0};
+    char *buffer;
+    itemT *items() { return reinterpret_cast<itemT *>(buffer); }
+    const itemT *items() const { return reinterpret_cast<const itemT *>(buffer); }
+    // Bytes actually occupied, for setUsersize on a partially filled buffer.
+    size_t usedBytes() const {
+      return ALIGN_DEFAULT(sizeof(HTramMessage)) + sizeof(itemT) * (size_t)next;
+    }
 };
+
+// Allocate a message able to hold `capacity` items.
+inline HTramMessage *newHTramMessage(int capacity) {
+  HTramMessage *m = new (capacity * (int)sizeof(itemT)) HTramMessage();
+  m->next = 0;
+  m->cap = capacity;
+  return m;
+}
+
+// Shrink the envelope to the bytes actually filled. A full buffer already
+// occupies its whole allocation, but this is correct in either case, so it is
+// applied uniformly on every send rather than only on the flush paths.
+inline void trimHTramMessage(HTramMessage *m) {
+  ((envelope *)UsrToEnv(m))->setUsersize(m->usedBytes());
+}
 
 class HTramLocalMessage : public CMessage_HTramLocalMessage {
   public:
-    HTramLocalMessage() { next = 0; }
-    HTramLocalMessage(int size, itemT *buf) : next(size) {
-      std::copy(buf, buf + size, buffer);
-    }
-    itemT buffer[LOCAL_BUFSIZE];
-    int next;
+    int next{0};
+    int cap{0};
+    char *buffer;
+    itemT *items() { return reinterpret_cast<itemT *>(buffer); }
 };
+
+inline HTramLocalMessage *newHTramLocalMessage(int capacity) {
+  HTramLocalMessage *m = new (capacity * (int)sizeof(itemT)) HTramLocalMessage();
+  m->next = 0;
+  m->cap = capacity;
+  return m;
+}
 
 class HTramNodeMessage : public CMessage_HTramNodeMessage {
   public:
-    HTramNodeMessage() : offset(CkNodeSize(CkMyNode())) {}
-    datatype buffer[BUFSIZE];
-    std::vector<int> offset;
+    // One offset per PE on the receiving node, and one payload slot per item
+    // the source message actually carried -- not BUFSIZE of each.
+    int noffsets{0};
+    char *buffer;
+    int *offset;
+    datatype *items() { return reinterpret_cast<datatype *>(buffer); }
 };
+
+inline HTramNodeMessage *newHTramNodeMessage(int capacity, int noffsets) {
+  HTramNodeMessage *m =
+      new (capacity * (int)sizeof(datatype), noffsets) HTramNodeMessage();
+  m->noffsets = noffsets;
+  return m;
+}
 
 class HTramNodeGrp : public CBase_HTramNodeGrp {
   HTramNodeGrp_SDAG_CODE
@@ -170,13 +212,17 @@ class HTram : public CBase_HTram {
     HTramRecv *nodeGrp;
     HTramMessage **msgBuffers;
     HTramLocalMessage **local_buf;
-    HTramMessage *localMsgBuffer;
     std::vector<itemT> *localBuffers;
     std::vector<std::vector<HTramMessage *>> fillerOverflowBuffers;
     std::vector<std::vector<int>> fillerOverflowBuffersBucketMin;
     std::vector<std::vector<int>> fillerOverflowBuffersBucketMax;
     int nodesize = 0;
     int *nodeOf;
+    // Set the envelope size and account for the message. Every send goes
+    // through here so that a run reports the bytes it actually shipped, not
+    // the bytes it allocated -- the paper reports wire volume alongside wall
+    // clock, and those two differed by up to 4x before messages were varsize.
+    void trim(HTramMessage *m);
 
   public:
     bool enable_flush;
@@ -184,6 +230,9 @@ class HTram : public CBase_HTram {
     int prevBufSize;
     int agg_msg_count;
     int flush_msg_count;
+    unsigned long long bytes_sent = 0;   // envelope user bytes handed to sends
+    unsigned long long bytes_alloc = 0;  // bytes allocated for those messages
+    unsigned long long msgs_sent = 0;
     HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
           bool enable_timed_flushing, double flush_timer, bool ret_item,
           bool req, CkCallback start_cb);
@@ -223,6 +272,7 @@ class HTram : public CBase_HTram {
     void getTotSendCount(int);
     void getTotRecvCount(int);
     void getTotTramHCount(int);
+    void tramStats(CkCallback cb);
     bool idleFlush();
     void avgLatency(CkCallback cb);
     void receivePerPE(HTramMessage *);
@@ -245,6 +295,10 @@ class HTramRecv : public CBase_HTramRecv {
     double msg_stats[STATS_COUNT]{0.0};
     std::atomic_int *msgs_in_transit;
     std::atomic_int *msgs_received_from;
+    // Node messages are built on the receiving node, so these are allocation
+    // bytes rather than wire bytes. They were a fixed BUFSIZE payload each.
+    std::atomic<unsigned long long> node_msg_bytes{0};
+    std::atomic<unsigned long long> node_msgs{0};
     HTramRecv();
     HTramRecv(CkMigrateMessage *msg);
     void setTramProxy(CkGroupID);
