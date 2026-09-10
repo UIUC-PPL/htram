@@ -594,11 +594,20 @@ void HTram::tflush(bool idleflush) {
           nodeGrpProxy[i].receive_no_sort(destMsg);
           msgBuffers[i] = new HTramMessage();
         } else if (agg == WPs) {
+#ifdef BUCKETS_BY_DEST
+          // These items are leaving; they are no longer held for this
+          // destination. Every other send site decrements, and omitting it
+          // here makes the counter drift upward permanently.
+          updates_in_tram[i] -= destMsg->next;
+#endif
           ((envelope *)UsrToEnv(destMsg))->setUsersize(
               sizeof(int) + sizeof(itemT) * (destMsg->next));
           nodeGrpProxy[i].receive(destMsg);
           msgBuffers[i] = new HTramMessage();
         } else if (agg == WW) {
+#ifdef BUCKETS_BY_DEST
+          updates_in_tram[i] -= destMsg->next;
+#endif
           ((envelope *)UsrToEnv(destMsg))->setUsersize(
               sizeof(int) + sizeof(itemT) * destMsg->next);
           thisProxy[i].receiveOnPE(destMsg);
