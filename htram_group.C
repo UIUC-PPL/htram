@@ -141,7 +141,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
 void HTram::trim(HTramMessage *m) {
   trimHTramMessage(m);
   bytes_sent += m->usedBytes();
-  bytes_alloc += ALIGN_DEFAULT(sizeof(HTramMessage)) +
+  bytes_alloc += m->payloadOffset() +
                  ALIGN_DEFAULT(sizeof(itemT) * (size_t)m->cap);
   msgs_sent++;
 }
@@ -588,8 +588,7 @@ void HTram::tflush(bool idleflush) {
     for (int i = 0; i < CkNumNodes(); i++) {
       local_buf[i]->next = local_idx[i];
       ((envelope *)UsrToEnv(local_buf[i]))
-          ->setUsersize(ALIGN_DEFAULT(sizeof(HTramLocalMessage)) +
-                        sizeof(itemT) * (size_t)local_buf[i]->next);
+          ->setUsersize(local_buf[i]->usedBytes());
       nodeGrpProxy[i].receive_small(local_buf[i]);
       local_buf[i] = newHTramLocalMessage(LOCAL_BUFSIZE);
       local_idx[i] = 0;
@@ -835,6 +834,9 @@ HTramRecv::HTramRecv() { msg_stats[MIN_LATENCY] = 100.0; }
 HTramRecv::HTramRecv(CkMigrateMessage *msg) {}
 
 void HTramRecv::receive_no_sort(HTramMessage *agg_message) {
+  checkHTramEnvelope(agg_message, agg_message->usedBytes(), agg_message->next,
+                     "HTramRecv::receive_no_sort");
+
   for (int i = CkNodeFirst(CkMyNode());
        i < CkNodeFirst(CkMyNode()) + CkNodeSize(CkMyNode()); i++) {
     HTramMessage *tmpMsg = (HTramMessage *)CkReferenceMsg(agg_message);
@@ -869,6 +871,9 @@ void HTram::receivePerPE(HTramMessage *msg) {
 }
 
 void HTram::receiveOnPE(HTramMessage *msg) {
+  checkHTramEnvelope(msg, msg->usedBytes(), msg->next,
+                     "HTram::receiveOnPE");
+
   if (!ret_list) {
     for (int i = 0; i < msg->next; i++)
       cb(objPtr, msg->items()[i].payload);
@@ -890,6 +895,9 @@ void HTramRecv::set_func_ptr_retarr(void (*func)(void *, datatype *, int),
 #endif
 
 void HTramRecv::receiveOnProc(HTramMessage *agg_message) {
+  checkHTramEnvelope(agg_message, agg_message->usedBytes(), agg_message->next,
+                     "HTramRecv::receiveOnProc");
+
 #ifndef BUCKETS_BY_DEST
   datatype *buf = new datatype[agg_message->next];
   for (int i = 0; i < agg_message->next; i++)
@@ -903,6 +911,9 @@ void HTramRecv::receiveOnProc(HTramMessage *agg_message) {
 }
 
 void HTramRecv::receive(HTramMessage *agg_message) {
+  checkHTramEnvelope(agg_message, agg_message->usedBytes(), agg_message->next,
+                     "HTramRecv::receive");
+
   int rank0PE = CkNodeFirst(thisIndex);
   // Sized to what this message actually carries. It used to be a fixed
   // BUFSIZE payload plus a std::vector member -- and since messages are freed
@@ -911,11 +922,7 @@ void HTramRecv::receive(HTramMessage *agg_message) {
   HTramNodeMessage *sorted_agg_message =
       newHTramNodeMessage(agg_message->next, CkNodeSize(CkMyNode()));
   node_msgs.fetch_add(1, std::memory_order_relaxed);
-  node_msg_bytes.fetch_add(ALIGN_DEFAULT(sizeof(HTramNodeMessage)) +
-                               ALIGN_DEFAULT(sizeof(datatype) *
-                                             (size_t)agg_message->next) +
-                               ALIGN_DEFAULT(sizeof(int) *
-                                             (size_t)CkNodeSize(CkMyNode())),
+  node_msg_bytes.fetch_add(sorted_agg_message->allocBytes(),
                            std::memory_order_relaxed);
 
   std::vector<int> sizes(CkNodeSize(CkMyNode()), 0);
@@ -953,15 +960,14 @@ void HTramRecv::receive(HTramMessage *agg_message) {
 }
 
 void HTramRecv::receive_small(HTramLocalMessage *agg_message) {
+  checkHTramEnvelope(agg_message, agg_message->usedBytes(), agg_message->next,
+                     "HTramRecv::receive_small");
+
   int rank0PE = CkNodeFirst(thisIndex);
   HTramNodeMessage *sorted_agg_message =
       newHTramNodeMessage(agg_message->next, CkNodeSize(CkMyNode()));
   node_msgs.fetch_add(1, std::memory_order_relaxed);
-  node_msg_bytes.fetch_add(ALIGN_DEFAULT(sizeof(HTramNodeMessage)) +
-                               ALIGN_DEFAULT(sizeof(datatype) *
-                                             (size_t)agg_message->next) +
-                               ALIGN_DEFAULT(sizeof(int) *
-                                             (size_t)CkNodeSize(CkMyNode())),
+  node_msg_bytes.fetch_add(sorted_agg_message->allocBytes(),
                            std::memory_order_relaxed);
 
   std::vector<int> sizes(CkNodeSize(CkMyNode()), 0);

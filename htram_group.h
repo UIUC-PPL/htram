@@ -95,8 +95,20 @@ class HTramMessage : public CMessage_HTramMessage {
     itemT *items() { return reinterpret_cast<itemT *>(buffer); }
     const itemT *items() const { return reinterpret_cast<const itemT *>(buffer); }
     // Bytes actually occupied, for setUsersize on a partially filled buffer.
+    //
+    // The payload offset is read back from the pointer the generated allocator
+    // installed rather than recomputed from sizeof(). Restating the allocator's
+    // formula here is what went wrong before: the old code wrote
+    // sizeof(int) + sizeof(itemT)*next, which is the offset of the payload only
+    // if the first field is followed by no padding and the message is not
+    // varsize -- neither of which held. Anything derived from `buffer` itself
+    // cannot drift from where the payload actually is, whatever charmc does
+    // with alignment or with fields added to this class later.
+    size_t payloadOffset() const {
+      return (size_t)(buffer - reinterpret_cast<const char *>(this));
+    }
     size_t usedBytes() const {
-      return ALIGN_DEFAULT(sizeof(HTramMessage)) + sizeof(itemT) * (size_t)next;
+      return payloadOffset() + sizeof(itemT) * (size_t)next;
     }
 };
 
@@ -115,12 +127,49 @@ inline void trimHTramMessage(HTramMessage *m) {
   ((envelope *)UsrToEnv(m))->setUsersize(m->usedBytes());
 }
 
+// Receive-side check that the envelope actually carried the items the message
+// claims to hold. Compiled out with -DHTRAM_NO_ENVELOPE_CHECK; otherwise it is
+// one comparison per received message, not per item.
+//
+// This exists because a sender-side size formula that undercounts the payload
+// is invisible inside a process: a local send hands over the same pointer, so
+// the receiver reads the whole allocation whatever the envelope says. Only a
+// message that leaves the address space is truncated to its declared size, and
+// then reading item next-1 runs off the end of the received buffer. That makes
+// the defect a multi-node-only, silent out-of-bounds read -- so the invariant
+// is asserted where it is observable, at every landing point, rather than left
+// to whichever run happens to notice corrupted values.
+//
+// setUsersize rounds up to ALIGN_DEFAULT, so getUsersize() >= the size the
+// sender asked for and the comparison is not tautological: it asks whether the
+// bytes that arrived cover the items that are about to be read.
+inline void checkHTramEnvelope(const void *msg, size_t need, int items,
+                               const char *where) {
+#ifndef HTRAM_NO_ENVELOPE_CHECK
+  size_t have = ((envelope *)UsrToEnv(const_cast<void *>(msg)))->getUsersize();
+  if (have < need)
+    CkAbort("htram: %s got a message declaring %d items, which need %zu user "
+            "bytes, in an envelope carrying only %zu. The sender under-sized "
+            "it; reading the last item would run past the received buffer.",
+            where, items, need, have);
+#else
+  (void)msg; (void)need; (void)items; (void)where;
+#endif
+}
+
 class HTramLocalMessage : public CMessage_HTramLocalMessage {
   public:
     int next{0};
     int cap{0};
     char *buffer;
     itemT *items() { return reinterpret_cast<itemT *>(buffer); }
+    // Same reasoning as HTramMessage::usedBytes().
+    size_t payloadOffset() const {
+      return (size_t)(buffer - reinterpret_cast<const char *>(this));
+    }
+    size_t usedBytes() const {
+      return payloadOffset() + sizeof(itemT) * (size_t)next;
+    }
 };
 
 inline HTramLocalMessage *newHTramLocalMessage(int capacity) {
@@ -138,6 +187,16 @@ class HTramNodeMessage : public CMessage_HTramNodeMessage {
     char *buffer;
     int *offset;
     datatype *items() { return reinterpret_cast<datatype *>(buffer); }
+    // What the allocator actually reserved: the offset it placed the last
+    // varsize array at, plus that array's own aligned length. Read back from
+    // the installed pointer for the same reason as HTramMessage::usedBytes().
+    // Node messages never leave the node, so this is for accounting rather
+    // than for an envelope, but it is the same formula either way.
+    size_t allocBytes() const {
+      return (size_t)(reinterpret_cast<const char *>(offset) -
+                      reinterpret_cast<const char *>(this)) +
+             ALIGN_DEFAULT(sizeof(int) * (size_t)noffsets);
+    }
 };
 
 inline HTramNodeMessage *newHTramNodeMessage(int capacity, int noffsets) {
