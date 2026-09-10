@@ -111,6 +111,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
   localBuffers = new std::vector<itemT>[CkNumPes()];
 
   local_buf = new HTramLocalMessage *[CkNumNodes()];
+  local_idx.reset(new int[CkNumNodes()]);
   for (int i = 0; i < CkNumNodes(); i++) {
     local_buf[i] = new HTramLocalMessage();
     local_idx[i] = 0;
@@ -179,6 +180,9 @@ HTram::HTram(CkGroupID cgid, CkCallback ecb) {
   endCb = ecb;
   myPE = CkMyPe();
   localMsgBuffer = new HTramMessage();
+  local_idx.reset(new int[CkNumNodes()]);
+  for (int i = 0; i < CkNumNodes(); i++)
+    local_idx[i] = 0;
 #ifndef NODE_SRC_BUFFER
   msgBuffers = new HTramMessage *[CkNumNodes()];
   for (int i = 0; i < CkNumNodes(); i++)
@@ -758,6 +762,8 @@ void HTram::onBufferCount(int total) {
 
 HTramNodeGrp::HTramNodeGrp() {
   msgBuffers = new HTramMessage *[CkNumNodes()];
+  get_idx.reset(new std::atomic<int>[CkNumNodes()]);
+  done_count.reset(new std::atomic<int>[CkNumNodes()]);
   for (int i = 0; i < CkNumNodes(); i++) {
     msgBuffers[i] = new HTramMessage();
     get_idx[i] = 0;

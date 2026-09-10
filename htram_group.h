@@ -50,7 +50,6 @@ using namespace std;
 #define SIZE_LIST (int[]){1024, 512, 2048}
 #define BUFSIZE 2048 //max num of items allocated in a buffer
 #define LOCAL_BUFSIZE 16
-#define NODE_COUNT 512
 
 #define TOTAL_LATENCY 0
 #define MAX_LATENCY 1
@@ -110,8 +109,12 @@ class HTramNodeGrp : public CBase_HTramNodeGrp {
   HTramNodeGrp_SDAG_CODE
   public:
     std::atomic_int flush_count{0};
-    std::atomic_int get_idx[NODE_COUNT];
-    std::atomic_int done_count[NODE_COUNT];
+    // Sized at construction from CkNumNodes(). These were fixed 512-element
+    // arrays while the constructor loops to CkNumNodes(), so any run on more
+    // than 512 nodes wrote past them into whatever followed -- silently, and
+    // within the range of node counts this code is meant to scale to.
+    std::unique_ptr<std::atomic<int>[]> get_idx;
+    std::unique_ptr<std::atomic<int>[]> done_count;
     HTramMessage **msgBuffers;
 #ifndef BUCKETS_BY_DEST
     int num_mailboxes = 0;
@@ -150,7 +153,7 @@ class HTram : public CBase_HTram {
     bool request;
     double flush_time;
     double msg_stats[STATS_COUNT]{0.0};
-    int local_idx[NODE_COUNT];
+    std::unique_ptr<int[]> local_idx; // CkNumNodes() entries
     // Number of destinations actually in use: nodes under WPs/WsP/PP, PEs
     // under WW. Per-destination structures are sized by this, not by
     // CkNumPes(), which over-allocates by the node size in every mode but WW.
