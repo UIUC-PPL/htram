@@ -77,9 +77,11 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
   // histo_bucket_count queues each, on every PE.
   tram_hold = new std::queue<datatype> *[CkNumPes()];
   updates_in_tram = new int[CkNumPes()];
+  full_sends = new int[CkNumPes()];
   for (int i = 0; i < CkNumPes(); i++) {
     tram_hold[i] = nullptr;
     updates_in_tram[i] = 0;
+    full_sends[i] = 0;
   }
   for (int i = 0; i < destCount(); i++)
     tram_hold[i] = new std::queue<datatype>[histo_bucket_count];
@@ -147,15 +149,17 @@ void HTram::trim(HTramMessage *m) {
 }
 
 // Reduce the byte counters to the caller's callback as
-// {msgs_sent, bytes_sent, bytes_alloc, node_msgs, node_msg_bytes}.
+// {msgs_sent, bytes_sent, bytes_alloc, node_msgs, node_msg_bytes,
+//  stale_flushes}.
 // The node-message figures are per node, so only rank 0 contributes them.
 void HTram::tramStats(CkCallback cb) {
-  unsigned long long values[5] = {msgs_sent, bytes_sent, bytes_alloc, 0, 0};
+  unsigned long long values[6] = {msgs_sent, bytes_sent, bytes_alloc, 0, 0,
+                                  stale_flushes};
   if (CkMyRank() == 0) {
     values[3] = nodeGrp->node_msgs.load(std::memory_order_relaxed);
     values[4] = nodeGrp->node_msg_bytes.load(std::memory_order_relaxed);
   }
-  contribute(5 * sizeof(unsigned long long), values,
+  contribute(6 * sizeof(unsigned long long), values,
              CkReduction::sum_ulong_long, cb);
 }
 
@@ -385,6 +389,7 @@ void HTram::insertBucketsByDest(int high, int dest_node) {
       if (destMsg->next == bufSize) {
         tot_send_count += destMsg->next;
         updates_in_tram[dest_node] -= destMsg->next;
+        noteFullSend(dest_node);
         trim(destMsg);
         if (agg == WW)
           thisProxy[dest_node].receiveOnPE(destMsg);
@@ -447,6 +452,7 @@ void HTram::insertValueWPs(datatype value, int dest_pe) {
     tot_send_count += destMsg->next;
 #ifdef BUCKETS_BY_DEST
     updates_in_tram[destNode] -= destMsg->next;
+    noteFullSend(destNode);
 #else
     updates_in_tram_count -= destMsg->next;
 #endif
@@ -520,6 +526,7 @@ void HTram::insertValue(datatype value, int dest_pe) {
       if (agg == WW) {
 #ifdef BUCKETS_BY_DEST
         updates_in_tram[dest_pe] -= destMsg->next;
+        noteFullSend(dest_pe);
 #endif
         trim(destMsg);
         thisProxy[dest_pe].receiveOnPE(destMsg);
@@ -532,6 +539,7 @@ void HTram::insertValue(datatype value, int dest_pe) {
         tot_send_count += destMsg->next;
 #ifdef BUCKETS_BY_DEST
         updates_in_tram[destNode] -= destMsg->next;
+        noteFullSend(destNode);
 #else
         updates_in_tram_count -= destMsg->next;
 #endif
@@ -775,6 +783,80 @@ void HTram::tflush(bool idleflush) {
   if (tram_done)
     tram_done(objPtr);
 #endif
+}
+
+#ifdef BUCKETS_BY_DEST
+// Everything tflush() would send to one destination: the held items already
+// admitted by the threshold, then the partial buffer. The hold is drained
+// first so that both leave in as few messages as possible -- tflush() ships
+// the partial buffer before draining, which can cost a second message per
+// destination for no reason.
+void HTram::flushDest(int dest) {
+  HTramMessage *destMsg = msgBuffers[dest];
+  for (int i = 0; i <= tram_threshold; i++) {
+    while (!tram_hold[dest][i].empty()) {
+      datatype item = tram_hold[dest][i].front();
+      tram_hold[dest][i].pop();
+      destMsg->items()[destMsg->next].payload = item;
+      destMsg->items()[destMsg->next].destPe = get_dest_proc(objPtr, item);
+      destMsg->next++;
+      if (destMsg->next == bufSize) {
+        tot_send_count += destMsg->next;
+        updates_in_tram[dest] -= destMsg->next;
+        trim(destMsg);
+        if (agg == WW)
+          thisProxy[dest].receiveOnPE(destMsg);
+        else
+          nodeGrpProxy[dest].receive(destMsg);
+        msgBuffers[dest] = newHTramMessage(bufSize);
+        destMsg = msgBuffers[dest];
+      }
+    }
+  }
+  if (destMsg->next) {
+    updates_in_tram[dest] -= destMsg->next;
+#ifdef ADD_FILLERS
+    // Same padding tflush() applies, so the two flushes differ only in which
+    // destinations they reach. Fillers sit above the threshold and were never
+    // counted in updates_in_tram, hence the decrement above comes first.
+    for (int i = tram_threshold + 1;
+         i < histo_bucket_count && destMsg->next < bufSize / 2; i++) {
+      while (!tram_hold[dest][i].empty() && destMsg->next < bufSize / 2) {
+        datatype item = tram_hold[dest][i].front();
+        tram_hold[dest][i].pop();
+        destMsg->items()[destMsg->next].payload = item;
+        destMsg->items()[destMsg->next].destPe = get_dest_proc(objPtr, item);
+        destMsg->next++;
+      }
+    }
+#endif
+    tot_send_count += destMsg->next;
+    trim(destMsg);
+    if (agg == WW)
+      thisProxy[dest].receiveOnPE(destMsg);
+    else
+      nodeGrpProxy[dest].receive(destMsg);
+    msgBuffers[dest] = newHTramMessage(bufSize);
+  }
+}
+#endif
+
+void HTram::flushStale() {
+#ifdef BUCKETS_BY_DEST
+  if (agg == WPs || agg == WW) {
+    for (int d = 0; d < destCount(); d++) {
+      if (full_sends[d] == 0 && (updates_in_tram[d] > 0 || msgBuffers[d]->next)) {
+        flushDest(d);
+        stale_flushes++;
+      }
+      full_sends[d] = 0;
+    }
+    return;
+  }
+#endif
+  // No per-destination bookkeeping in the other modes, so the best available
+  // answer is the whole-library flush.
+  tflush();
 }
 
 void HTram::flush_everything() {

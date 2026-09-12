@@ -262,6 +262,13 @@ class HTram : public CBase_HTram {
 #ifdef BUCKETS_BY_DEST
     int *updates_in_tram;
     array2d_of_queues tram_hold;
+    // Buffers to each destination that reached bufSize and shipped on their
+    // own since the last flushStale(). Zero means traffic to that destination
+    // is not filling anything, so whatever is sitting in its buffer will stay
+    // there until somebody flushes it.
+    int *full_sends;
+    void noteFullSend(int dest) { full_sends[dest]++; }
+    void flushDest(int dest);
 #else
     int updates_in_tram_count = 0;
     std::queue<datatype> *tram_hold;
@@ -314,6 +321,12 @@ class HTram : public CBase_HTram {
     void reset_stats(int buf_type, int buf_size, int agtype);
     void enableIdleFlush();
     void tflush(bool idleflush = false);
+    // Flush only the destinations whose buffers did not fill on their own
+    // since the previous call. Meant to be called once per application round:
+    // it is the adaptive half of the flush cadence, and costs nothing for a
+    // destination that is already shipping full buffers.
+    void flushStale();
+    unsigned long long stale_flushes = 0; // destinations flushed by flushStale
     void flush_everything();
     void setHistoBucketCount(int bucket_count);
 #ifdef BUCKETS_BY_DEST
