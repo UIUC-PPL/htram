@@ -315,8 +315,7 @@ class HTram : public CBase_HTram {
     void enableIdleFlush();
     void tflush(bool idleflush = false);
     void flush_everything();
-    void shareArrayOfBuckets(std::vector<datatype> *new_tram_hold,
-                             int bucket_count);
+    void setHistoBucketCount(int bucket_count);
 #ifdef BUCKETS_BY_DEST
     void insertBucketsByDest(int, int);
 #else

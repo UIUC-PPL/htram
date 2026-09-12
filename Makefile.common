@@ -1,3 +1,9 @@
-CHARMC =../../../ofi-linux-x86_64-cxi-slurmpmi2cray/bin/charmc $(OPTS)
-# CHARMC_SMP = /home/x-rrao/charm/ucx-linux-x86_64-smp-slurmpmi2/bin/charmc $(OPTS)
-CHARMC_SMP = /home/x-rrao/charm_reconverse/bin/charmc $(OPTS)
+# Where charmc lives. Machine-specific, so it is overridable three ways, in
+# increasing precedence: this default, a config.mk that is not tracked, and a
+# variable on make's command line.
+#
+#   Delta:    /u/rao1/charm_reconverse/bin/charmc
+#   Frontier: /ccs/home/rrao/charm_reconverse/bin/charmc
+CHARMC_SMP ?= charmc
+-include $(dir $(lastword $(MAKEFILE_LIST)))config.mk
+CHARMC_SMP := $(CHARMC_SMP) $(OPTS)

@@ -257,9 +257,23 @@ void HTram::set_func_ptr_retarr(void (*func)(void *, datatype *, int),
 
 HTram::HTram(CkMigrateMessage *msg) {}
 
-void HTram::shareArrayOfBuckets(std::vector<datatype> *new_tram_hold,
-                                int bucket_count) {
-  histo_bucket_count = bucket_count;
+// The application tells the library how many priority buckets it uses. This
+// used to be shareArrayOfBuckets(), which also took a pointer to the caller's
+// own array of per-bucket vectors and then never read it -- the application
+// was paying for HISTO_BUCKET_COUNT std::vectors per PE, each with a reserved
+// 4096 entries, to hand over a pointer that was dropped on the floor.
+//
+// The count itself is real, but it can only be accepted while it still agrees
+// with what the constructor allocated: tram_hold's rows are sized by it at
+// construction, and insertBucketsByDest() walks up to histo_bucket_count. A
+// larger count arriving later would have walked straight off the end of every
+// row. Since nothing needs to change it, refuse rather than pretend.
+void HTram::setHistoBucketCount(int bucket_count) {
+  if (bucket_count != histo_bucket_count)
+    CkAbort("htram: the application uses %d priority buckets but the library "
+            "allocated %d. The per-destination hold is sized at construction, "
+            "so this cannot be changed afterwards.",
+            bucket_count, histo_bucket_count);
 }
 
 #ifdef BUCKETS_BY_DEST
@@ -383,7 +397,11 @@ void HTram::insertBucketsByDest(int high, int dest_node) {
         break;
     }
   }
-  tram_done(objPtr);
+  // Optional: the 2-argument registration never sets this, and the GRAPH
+  // client no longer needs it either. Calling it unconditionally was a
+  // null dereference waiting for the first client that did not supply one.
+  if (tram_done)
+    tram_done(objPtr);
 }
 #else
 void HTram::insertBuckets(int high) {
@@ -408,7 +426,11 @@ void HTram::insertBuckets(int high) {
         break;
     }
   }
-  tram_done(objPtr);
+  // Optional: the 2-argument registration never sets this, and the GRAPH
+  // client no longer needs it either. Calling it unconditionally was a
+  // null dereference waiting for the first client that did not supply one.
+  if (tram_done)
+    tram_done(objPtr);
 }
 #endif
 
@@ -747,7 +769,11 @@ void HTram::tflush(bool idleflush) {
         msgBuffers[node] = newHTramMessage(bufSize);
       }
   }
-  tram_done(objPtr);
+  // Optional: the 2-argument registration never sets this, and the GRAPH
+  // client no longer needs it either. Calling it unconditionally was a
+  // null dereference waiting for the first client that did not supply one.
+  if (tram_done)
+    tram_done(objPtr);
 #endif
 }
 

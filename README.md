@@ -1,48 +1,80 @@
 # HTram
 
-The HTram library is a new messaging library for Charm++.
+HTram is a message-aggregation library for Charm++. Application code hands it
+one small item at a time; it batches items per destination, ships a single
+message per batch, and calls back on the receiving side with the whole batch.
 
-## How to use (non-smp):
+The SMP library is `htram_group`. A non-SMP variant (`tramNonSmp`) used to live
+here and was retired in September 2026: it had diverged from the SMP path,
+two of its dependents no longer compiled, and nothing in the evaluation used
+it. Recover it from history if it is ever needed again.
 
-1. Add the following to your .ci file:
-   ```
-   extern module tramNonSmp;
-   group tramNonSmp<your_message_type>;
-   message tramNonSmpMsg<your_message_type>;
-   readonly CProxy_tramNonSmp<your_message_type> tram_proxy;
-   ```
-   where your_message_type is the type of the message you are sending.
-2. Add ` #include "tramNonSmp.h" ` to your charm .cpp or .c file
-3. (recommended) Add the following aliases for your types to your charm code, and define the tram proxy:
-   ```
-   using tram_proxy_t = CProxy_tramNonSmp<your_message_type>;
-   using tram_t = tramNonSmp<your_message_type>;
-   tram_proxy_t tram_proxy;
-   ```
-4. Initialize the tram library in your Main function:
-   ```
-   CkGroupID updater_array_gid;
-	 updater_array_gid = arr.ckGetArrayID();
-	 tram_proxy = tram_proxy_t::ckNew(updater_array_gid, buffer_size, enable_buffer_flushing, flush_timer);
-   ```
-5. Define a target function that will receive messages from htram.
-   This must be a static void function that takes two arguments: a void pointer,
-   and a message of type your_message_type:
-   ```
-   static void name_of_target_fn(void *p, your_message_type message)
-   {
-     //call to a C++ method to process the message
-   }
-   ```
-6. Get the local tram library using `tram_t *tram = tram_proxy.ckLocalBranch();`
-7. Set this function as the receiver with `tram->set_func_ptr`
-9. Use `tram->insertValue(destpe, message)` to send messages in htram
-8. Use `tram->tflush() to flush messages`
-9. To compile with htram, do:
-   ```
-   $(CHARMC) tramNonSmp.ci
-   $(CHARMC) -c tramNonSmp.C -o tramNonSmp.o -g
-   $(CHARMC) tramNonSmp.o -o libtramnonsmp.a -language charm++
-   $(CHARMC) mycode.ci -DTRAM_NON_SMP
-   $(CHARMC) mycode.cpp libtramnonsmp.a -language charm++ -o mycode -std=c++1z -DTRAM_NON_SMP
-   ```
+## Item type
+
+The item type is fixed at library build time rather than templated, so the
+library can ship as a static archive. Pick the flavour with a `-D` and, for
+`GRAPH`, point the build at the header that defines the payload:
+
+| Flavour | Item type | Defined in |
+|---|---|---|
+| `-DHISTO` | `int` | `types.h` |
+| `-DIG` | `std::pair<int,int>` | `types.h` |
+| `-DUNIONFIND` | `std::pair<int,int>` | `types.h` |
+| `-DGRAPH` | `Update` | `HTRAM_GRAPH_TYPES_HEADER` |
+
+Step 8 of the SC27 plan replaces this with a byte-oriented core plus a header-
+only typed facade, at which point one archive serves every payload.
+
+## Building
+
+    make libhtram_group_graph.a GRAPH_INCLUDE=/path/to/charm_graph_code
+
+`charmc`'s location is machine-specific. It is taken from, in increasing
+precedence: the `CHARMC_SMP ?=` default in `Makefile.common`, an untracked
+`config.mk` next to it, and a variable on make's command line.
+
+    echo 'CHARMC_SMP = /u/rao1/charm_reconverse/bin/charmc' > config.mk
+
+## Using it
+
+1.  In your `.ci` file:
+
+        extern module htram_group;
+        readonly CProxy_HTram tram_proxy;
+
+2.  In your C++ file, `#include "htram_group.h"`.
+
+3.  Create the two node groups and the group itself in `Main`:
+
+        CProxy_HTramRecv     recv = CProxy_HTramRecv::ckNew();
+        CProxy_HTramNodeGrp  src  = CProxy_HTramNodeGrp::ckNew();
+        tram_proxy = CProxy_HTram::ckNew(recv.ckGetGroupID(), src.ckGetGroupID(),
+                                         buffer_size, enable_timed_flushing,
+                                         flush_timer, ret_item, request, start_cb);
+
+    `buffer_size` is in items and must be in `1..BUFSIZE`; it is a live knob,
+    not a hint. Messages are varsize, so a smaller buffer really does put fewer
+    bytes on the wire.
+
+4.  Get the local branch with `tram_proxy.ckLocalBranch()` and register the
+    receive callbacks. The batch form is what the graph code uses:
+
+        tram->set_func_ptr_retarr(deliver_batch,      // (void*, datatype*, int)
+                                  dest_pe_of_item,    // (void*, datatype) -> int
+                                  batch_done,         // (void*)
+                                  this);
+
+5.  Send with `insertValue(item, dest_pe)`, or, when the application has a
+    priority bucket for the item, `sendItemPrioDeferredDest(item, bucket)` --
+    which lets the library hold low-priority items back until
+    `changeThreshold()` admits their bucket. Call `setHistoBucketCount()` once
+    to declare how many buckets you use.
+
+6.  `tflush()` sends every partially filled buffer; `flush_everything()` also
+    drains the per-destination hold.
+
+## Aggregation modes
+
+`agg` selects where batching happens: `WPs` (worker to per-source node buffer),
+`WsP`, `PP`, and `WW` (worker to worker). `WPs` is the default for the graph
+build. `-DBUCKETS_BY_DEST` additionally keys the priority hold by destination.

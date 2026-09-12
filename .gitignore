@@ -44,5 +44,6 @@ charmrun
 # vscode
 .vscode
 
-# libtramnonsmp.a
-libtramnonsmp.a
+
+# Machine-specific charmc location
+config.mk

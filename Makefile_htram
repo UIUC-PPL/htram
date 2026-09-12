@@ -1,15 +1,6 @@
-all: libhtram_group.a libtramnonsmp.a
+all: libhtram_group.a
 
-.PHONY: htram_group.o tramNonSmp.o
-
-libtramnonsmp.a : tramNonSmp.o
-	$(CHARMC) tramNonSmp.o -o libtramnonsmp.a -language charm++
-
-tramNonSmp.o : tramNonSmp.C tramNonSmp.def.h tramNonSmp.decl.h
-	$(CHARMC) -c tramNonSmp.C -o tramNonSmp.o -g
-
-tramNonSmp.def.h tramNonSmp.decl.h : tramNonSmp.ci
-	$(CHARMC) tramNonSmp.ci
+.PHONY: htram_group.o
 
 libhtram_group_histo.a: CFLAGS = -DHISTO
 libhtram_group_histo.a: htram_group.o
@@ -44,9 +35,6 @@ htram_group.def.h htram_group.decl.h: htram_group.ci
 # Convenience alias used by the main htram Makefile
 libhtram_group.a: libhtram_group_unionfind.a
 	cp libhtram_group_unionfind.a libhtram_group.a
-
-test-driver: all
-	./charmrun +p16 ./driver  ++local +setcpuaffinity ++ppn 4
 
 clean-libs:
 	rm -f *.def.h *.decl.h
