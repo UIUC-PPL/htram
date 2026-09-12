@@ -362,6 +362,17 @@ class HTram : public CBase_HTram {
     void insertBuckets(int);
 #endif
     void changeThreshold(int, int, float);
+    // Merge every k adjacent priority buckets into one: bucket i becomes i / k,
+    // and both thresholds follow. Exact for an application whose bucket index
+    // is floor(distance / width) and which multiplies its width by k at the
+    // same time, since floor(floor(x) / k) == floor(x / k). Not supported with
+    // combining on.
+    void coarsenBuckets(int k);
+    // Recount what the admitted counters should hold -- held items at or
+    // below the threshold plus everything sitting in the buffer -- and return
+    // the total absolute difference. Walks every held queue: a debugging aid
+    // for diagnosis builds, not for a timed path.
+    long long admittedDrift() const;
     void sanityCheck();
     void htramQuiesce(CkCallback cb);
     void onQD();

@@ -1,4 +1,5 @@
 #include "htram_group.h"
+#include <algorithm>
 #include <thread>
 #include <mutex>
 
@@ -408,6 +409,78 @@ void HTram::sendItemPrioDeferredDest(datatype new_update, int neighbor_bucket) {
     insertBuckets(tram_threshold);
 }
 #endif
+
+// Buckets are merged in ascending order: bucket i's items go to i / k, which
+// is below i and has already given its own items away, so no queue is moved
+// twice. An item's admitted status can only change one way. Every old bucket
+// at or below the threshold t lands at or below t / k, but old buckets
+// t+1 .. k*(t/k+1)-1 land on t / k as well and are admitted from now on.
+long long HTram::admittedDrift() const {
+  long long drift = 0;
+#ifdef BUCKETS_BY_DEST
+  if (holds)
+    return 0;
+  for (int d = 0; d < destCount(); d++) {
+    long long want = msgBuffers[d] ? msgBuffers[d]->next : 0;
+    if (tram_hold[d])
+      for (int i = 0; i <= tram_threshold && i < histo_bucket_count; i++)
+        want += tram_hold[d][i].size();
+    drift += std::llabs(want - (long long)updates_in_tram[d]);
+  }
+#endif
+  return drift;
+}
+
+void HTram::coarsenBuckets(int k) {
+  if (k < 2)
+    return;
+#ifdef BUCKETS_BY_DEST
+  if (holds)
+    CkAbort("htram: coarsenBuckets is not supported with combining on");
+#endif
+  const int new_tram = tram_threshold / k;
+  const int admit_below = std::min((new_tram + 1) * k, histo_bucket_count);
+#ifdef BUCKETS_BY_DEST
+  for (int d = 0; d < destCount(); d++) {
+    if (!tram_hold[d])
+      continue;
+    for (int i = tram_threshold + 1; i < admit_below; i++)
+      updates_in_tram[d] += tram_hold[d][i].size();
+    for (int i = 1; i < histo_bucket_count; i++) {
+      std::queue<datatype> &src = tram_hold[d][i];
+      std::queue<datatype> &dst = tram_hold[d][i / k];
+      while (!src.empty()) {
+        dst.push(src.front());
+        src.pop();
+      }
+    }
+  }
+#else
+  for (int i = tram_threshold + 1; i < admit_below; i++)
+    updates_in_tram_count += tram_hold[i].size();
+  for (int i = 1; i < histo_bucket_count; i++) {
+    std::queue<datatype> &src = tram_hold[i];
+    std::queue<datatype> &dst = tram_hold[i / k];
+    while (!src.empty()) {
+      dst.push(src.front());
+      src.pop();
+    }
+  }
+#endif
+  tram_threshold = new_tram;
+  // A negative direct threshold means nothing goes direct; integer division
+  // would round it up to 0.
+  if (direct_threshold > 0)
+    direct_threshold /= k;
+#ifdef BUCKETS_BY_DEST
+  for (int d = 0; d < destCount(); d++)
+    if (updates_in_tram[d] > selectivity * bufSize)
+      insertBucketsByDest(tram_threshold, d);
+#else
+  if (updates_in_tram_count > selectivity * bufSize * num_nodes)
+    insertBuckets(tram_threshold);
+#endif
+}
 
 #ifdef BUCKETS_BY_DEST
 void HTram::insertBucketsByDest(int high, int dest_node) {
