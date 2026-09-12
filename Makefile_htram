@@ -26,7 +26,7 @@ libhtram_group_graph.a: CFLAGS = -DGRAPH -DBUCKETS_BY_DEST -DADD_FILLERS -I$(GRA
 libhtram_group_graph.a: htram_group.o
 	$(CHARMC_SMP) $(CHARMCFLAGS) $< -o $@ -language charm++
 
-htram_group.o: htram_group.C htram_group.def.h htram_group.decl.h
+htram_group.o: htram_group.C htram_group.h htram_combine.h htram_group.def.h htram_group.decl.h
 	$(CHARMC_SMP) -c htram_group.C -O3 $(CFLAGS)
 
 htram_group.def.h htram_group.decl.h: htram_group.ci
@@ -40,3 +40,8 @@ clean-libs:
 	rm -f *.def.h *.decl.h
 	rm -f *.log.gz *.projrc *.topo *.sts *.sum
 	rm -f *.a
+
+# CombiningHold's model check. Needs no Charm++.
+test_combine: tests/test_combine.cpp htram_combine.h
+	$(CXX) -O2 -std=c++17 -Wall -Wextra -I. $< -o tests/$@
+	tests/$@

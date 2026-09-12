@@ -11,6 +11,7 @@
 #define ALL_BUF_TYPES
 #include <queue>
 #include "htram_group.decl.h"
+#include "htram_combine.h"
 
 // Application-specific data type selection.
 // Pass one of -DHISTO, -DPHOLD, -DIG, -DUNION_FIND, or -DGRAPH at compile time.
@@ -269,6 +270,22 @@ class HTram : public CBase_HTram {
     int *full_sends;
     void noteFullSend(int dest) { full_sends[dest]++; }
     void flushDest(int dest);
+    // One per destination when combining is on; null otherwise, and then
+    // nothing below is reached. With combining on, the holds replace both
+    // tram_hold and the direct path into msgBuffers: every item waits in its
+    // destination's hold, where a later item for the same key can fold into
+    // it, until a full buffer's worth has been admitted by the threshold or
+    // a flush reaches it.
+    CombiningHold *holds = nullptr;
+    void releaseFull(int dest);
+    void shipBuffer(int dest, bool full);
+    void appendHeld(HTramMessage *m, const void *item) {
+      datatype value;
+      std::memcpy(&value, item, sizeof(datatype));
+      m->items()[m->next].payload = value;
+      m->items()[m->next].destPe = get_dest_proc(objPtr, value);
+      m->next++;
+    }
 #else
     int updates_in_tram_count = 0;
     std::queue<datatype> *tram_hold;
@@ -327,6 +344,16 @@ class HTram : public CBase_HTram {
     // destination that is already shipping full buffers.
     void flushStale();
     unsigned long long stale_flushes = 0; // destinations flushed by flushStale
+    // Turn on source-side combining. Must be called before the first send.
+    // `ops` must outlive the library; `client` is handed to ops->on_absorb.
+    void enableCombining(const HoldOps *ops, void *client);
+    bool combining() const {
+#ifdef BUCKETS_BY_DEST
+      return holds != nullptr;
+#else
+      return false;
+#endif
+    }
     void flush_everything();
     void setHistoBucketCount(int bucket_count);
 #ifdef BUCKETS_BY_DEST

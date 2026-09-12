@@ -51,3 +51,4 @@ config.mk
 # A Charm++ abort dumps core into the working directory. These are hundreds of
 # megabytes each and accumulate silently against the home quota.
 core.*
+tests/test_combine

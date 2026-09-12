@@ -150,16 +150,24 @@ void HTram::trim(HTramMessage *m) {
 
 // Reduce the byte counters to the caller's callback as
 // {msgs_sent, bytes_sent, bytes_alloc, node_msgs, node_msg_bytes,
-//  stale_flushes}.
+//  stale_flushes, items absorbed by the holds, items that entered them}.
 // The node-message figures are per node, so only rank 0 contributes them.
 void HTram::tramStats(CkCallback cb) {
-  unsigned long long values[6] = {msgs_sent, bytes_sent, bytes_alloc, 0, 0,
-                                  stale_flushes};
+  unsigned long long absorbed = 0, entered = 0;
+#ifdef BUCKETS_BY_DEST
+  if (holds)
+    for (int d = 0; d < destCount(); d++) {
+      absorbed += holds[d].absorbed();
+      entered += holds[d].inserted() + holds[d].absorbed();
+    }
+#endif
+  unsigned long long values[8] = {msgs_sent, bytes_sent, bytes_alloc, 0, 0,
+                                  stale_flushes, absorbed, entered};
   if (CkMyRank() == 0) {
     values[3] = nodeGrp->node_msgs.load(std::memory_order_relaxed);
     values[4] = nodeGrp->node_msg_bytes.load(std::memory_order_relaxed);
   }
-  contribute(6 * sizeof(unsigned long long), values,
+  contribute(8 * sizeof(unsigned long long), values,
              CkReduction::sum_ulong_long, cb);
 }
 
@@ -289,14 +297,16 @@ void HTram::changeThreshold(int _directThreshold, int _newtramThreshold,
   int num_dest = CkNumNodes();
   if (agg == WW)
     num_dest = CkNumPes();
+  // With combining on, a hold's per-bucket count is exact; its lists are not,
+  // because decrease-key leaves stale references behind.
   if (_newtramThreshold > tram_threshold) {
     for (int k = 0; k < num_dest; k++)
       for (int i = tram_threshold + 1; i <= _newtramThreshold; i++)
-        updates_in_tram[k] += tram_hold[k][i].size();
+        updates_in_tram[k] += holds ? holds[k].live(i) : tram_hold[k][i].size();
   } else if (tram_threshold > _newtramThreshold) {
     for (int k = 0; k < num_dest; k++)
       for (int i = tram_threshold; i > _newtramThreshold; i--)
-        updates_in_tram[k] -= tram_hold[k][i].size();
+        updates_in_tram[k] -= holds ? holds[k].live(i) : tram_hold[k][i].size();
   }
 #ifdef DEBUG
   for (int k = 0; k < CkNumNodes(); k++)
@@ -307,8 +317,12 @@ void HTram::changeThreshold(int _directThreshold, int _newtramThreshold,
   direct_threshold = _directThreshold;
   selectivity = _selectivity;
   for (int dest_node = 0; dest_node < num_dest; dest_node++)
-    if (updates_in_tram[dest_node] > selectivity * bufSize)
-      insertBucketsByDest(tram_threshold, dest_node);
+    if (updates_in_tram[dest_node] > selectivity * bufSize) {
+      if (holds)
+        releaseFull(dest_node);
+      else
+        insertBucketsByDest(tram_threshold, dest_node);
+    }
 }
 #else
 void HTram::changeThreshold(int _directThreshold, int _newtramThreshold,
@@ -343,6 +357,26 @@ void HTram::sendItemPrioDeferredDest(datatype new_update, int neighbor_bucket) {
   if (dest_node < 0 || dest_node >= num_dest) {
     CkPrintf("\nError");
     CkAbort("err");
+  }
+  if (holds) {
+    // The admitted count follows the item across the threshold: a fold that
+    // improves a held item can move it from above the threshold to below.
+    CombiningHold::InsertResult r =
+        holds[dest_node].insert(&new_update, neighbor_bucket);
+    const bool admitted = r.new_bucket <= tram_threshold;
+    if (!r.absorbed) {
+      if (admitted)
+        updates_in_tram[dest_node]++;
+    } else if (r.old_bucket != r.new_bucket) {
+      const bool was_admitted = r.old_bucket <= tram_threshold;
+      if (admitted && !was_admitted)
+        updates_in_tram[dest_node]++;
+      else if (was_admitted && !admitted)
+        updates_in_tram[dest_node]--;
+    }
+    if (updates_in_tram[dest_node] >= selectivity * bufSize)
+      releaseFull(dest_node);
+    return;
   }
   if (neighbor_bucket > tram_threshold) {
     tram_hold[dest_node][neighbor_bucket].push(new_update);
@@ -612,6 +646,19 @@ void HTram::enableIdleFlush() {
 }
 
 void HTram::tflush(bool idleflush) {
+#ifdef BUCKETS_BY_DEST
+  if (holds) {
+    // Nothing waits in msgBuffers or tram_hold with combining on; the holds
+    // are the whole of what is buffered, and flushDest drains them. The idle
+    // flag is not consulted: the path below drains the hold and ships partial
+    // buffers whatever it says, and this matches that.
+    for (int d = 0; d < destCount(); d++)
+      flushDest(d);
+    if (tram_done)
+      tram_done(objPtr);
+    return;
+  }
+#endif
   if (agg == PP) {
     int flush_count =
         srcNodeGrp->flush_count.fetch_add(1, std::memory_order_seq_cst);
@@ -786,12 +833,83 @@ void HTram::tflush(bool idleflush) {
 }
 
 #ifdef BUCKETS_BY_DEST
+void HTram::enableCombining(const HoldOps *ops, void *client) {
+  if (ops->item_size != sizeof(datatype))
+    CkAbort("htram: combining ops describe %zu-byte items, but the library "
+            "carries %zu-byte items",
+            ops->item_size, sizeof(datatype));
+  if (agg != WPs && agg != WW)
+    CkAbort("htram: combining needs per-destination buffers (WPs or WW)");
+  if (holds)
+    return;
+  for (int d = 0; d < destCount(); d++)
+    if (updates_in_tram[d] || msgBuffers[d]->next)
+      CkAbort("htram: enableCombining called after items were sent");
+  holds = new CombiningHold[CkNumPes()];
+  for (int d = 0; d < CkNumPes(); d++)
+    holds[d].init(ops, client, histo_bucket_count);
+}
+
+// Send msgBuffers[dest] and replace it. `full` is whether it filled on its own
+// rather than being flushed, which is what flushStale() keys on.
+void HTram::shipBuffer(int dest, bool full) {
+  HTramMessage *m = msgBuffers[dest];
+  tot_send_count += m->next;
+  if (full)
+    noteFullSend(dest);
+  trim(m);
+  if (agg == WW)
+    thisProxy[dest].receiveOnPE(m);
+  else
+    nodeGrpProxy[dest].receive(m);
+  msgBuffers[dest] = newHTramMessage(bufSize);
+}
+
+// Combining on: while a full buffer's worth of admitted items is held for
+// dest, fill a buffer from the lowest buckets and ship it. Items leave the
+// hold only here or in a flush, so everything still waiting can be folded.
+void HTram::releaseFull(int dest) {
+  while (updates_in_tram[dest] >= selectivity * bufSize) {
+    HTramMessage *m = msgBuffers[dest];
+    holds[dest].release(tram_threshold, bufSize - m->next,
+                        [&](void *item) { appendHeld(m, item); });
+    if (m->next < bufSize)
+      break; // the admitted items ran out first; nothing full to send
+    updates_in_tram[dest] -= m->next;
+    shipBuffer(dest, true);
+  }
+}
+
 // Everything tflush() would send to one destination: the held items already
 // admitted by the threshold, then the partial buffer. The hold is drained
 // first so that both leave in as few messages as possible -- tflush() ships
 // the partial buffer before draining, which can cost a second message per
 // destination for no reason.
 void HTram::flushDest(int dest) {
+  if (holds) {
+    for (;;) {
+      HTramMessage *m = msgBuffers[dest];
+      holds[dest].release(tram_threshold, bufSize - m->next,
+                          [&](void *item) { appendHeld(m, item); });
+      if (m->next < bufSize)
+        break;
+      updates_in_tram[dest] -= m->next;
+      shipBuffer(dest, false);
+    }
+    HTramMessage *m = msgBuffers[dest];
+    if (m->next) {
+      updates_in_tram[dest] -= m->next;
+#ifdef ADD_FILLERS
+      // After the drain above nothing admitted is left, so this takes from
+      // above the threshold, as tflush()'s fillers do.
+      if (m->next < bufSize / 2)
+        holds[dest].release(histo_bucket_count - 1, bufSize / 2 - m->next,
+                            [&](void *item) { appendHeld(m, item); });
+#endif
+      shipBuffer(dest, false);
+    }
+    return;
+  }
   HTramMessage *destMsg = msgBuffers[dest];
   for (int i = 0; i <= tram_threshold; i++) {
     while (!tram_hold[dest][i].empty()) {
