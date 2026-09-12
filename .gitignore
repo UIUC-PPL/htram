@@ -47,3 +47,7 @@ charmrun
 
 # Machine-specific charmc location
 config.mk
+
+# A Charm++ abort dumps core into the working directory. These are hundreds of
+# megabytes each and accumulate silently against the home quota.
+core.*
