@@ -151,7 +151,8 @@ void HTram::trim(HTramMessage *m) {
 
 // Reduce the byte counters to the caller's callback as
 // {msgs_sent, bytes_sent, bytes_alloc, node_msgs, node_msg_bytes,
-//  stale_flushes, items absorbed by the holds, items that entered them}.
+//  stale_flushes, items absorbed by the holds, items that entered them,
+//  idle_flushes}.
 // The node-message figures are per node, so only rank 0 contributes them.
 void HTram::tramStats(CkCallback cb) {
   unsigned long long absorbed = 0, entered = 0;
@@ -162,13 +163,14 @@ void HTram::tramStats(CkCallback cb) {
       entered += holds[d].inserted() + holds[d].absorbed();
     }
 #endif
-  unsigned long long values[8] = {msgs_sent, bytes_sent, bytes_alloc, 0, 0,
-                                  stale_flushes, absorbed, entered};
+  unsigned long long values[9] = {msgs_sent, bytes_sent, bytes_alloc, 0, 0,
+                                  stale_flushes, absorbed, entered,
+                                  idle_flushes};
   if (CkMyRank() == 0) {
     values[3] = nodeGrp->node_msgs.load(std::memory_order_relaxed);
     values[4] = nodeGrp->node_msg_bytes.load(std::memory_order_relaxed);
   }
-  contribute(8 * sizeof(unsigned long long), values,
+  contribute(9 * sizeof(unsigned long long), values,
              CkReduction::sum_ulong_long, cb);
 }
 
@@ -1048,6 +1050,26 @@ void HTram::flushStale() {
   // No per-destination bookkeeping in the other modes, so the best available
   // answer is the whole-library flush.
   tflush();
+}
+
+void HTram::flushIdle() {
+#ifdef BUCKETS_BY_DEST
+  if (agg == WPs || agg == WW) {
+    // Called on every scheduler pass while the PE is idle, so the common case
+    // -- nothing buffered -- has to cost one comparison per destination.
+    for (int d = 0; d < destCount(); d++)
+      if (updates_in_tram[d] > 0 || msgBuffers[d]->next) {
+        flushDest(d);
+        idle_flushes++;
+      }
+    return;
+  }
+#endif
+  // Nothing here. The other modes keep no per-destination bookkeeping, so the
+  // only flush available is the whole-library one -- and this is called on
+  // every idle scheduler pass, so an unconditional flush would be a busy loop
+  // shipping empty messages rather than a cadence. flushStale() can fall back
+  // that way because it runs once per round; this cannot.
 }
 
 void HTram::flush_everything() {

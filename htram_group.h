@@ -343,7 +343,14 @@ class HTram : public CBase_HTram {
     // it is the adaptive half of the flush cadence, and costs nothing for a
     // destination that is already shipping full buffers.
     void flushStale();
+    // Flush every destination holding admitted items. For a caller that has
+    // nothing left to do: this PE cannot add to any buffer until a message
+    // arrives, so waiting for one to fill is pure latency. Cheap enough to
+    // call on every idle scheduler pass, and a no-op outside WPs/WW, which
+    // are the only modes with the per-destination counters that make it so.
+    void flushIdle();
     unsigned long long stale_flushes = 0; // destinations flushed by flushStale
+    unsigned long long idle_flushes = 0;  // destinations flushed by flushIdle
     // Turn on source-side combining. Must be called before the first send.
     // `ops` must outlive the library; `client` is handed to ops->on_absorb.
     void enableCombining(const HoldOps *ops, void *client);
