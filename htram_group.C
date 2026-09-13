@@ -433,6 +433,45 @@ long long HTram::admittedDrift() const {
   return drift;
 }
 
+/**
+ * What this PE is still holding for its destinations, split three ways:
+ * `held` is every item waiting in the per-destination hold whatever its
+ * bucket, `admitted` is the library's own count of how many of those the
+ * threshold has released for sending, and `buffered` is what sits in partly
+ * filled buffers with nowhere to go until something flushes them. A client
+ * that has stopped making progress needs all three to tell "the threshold is
+ * not admitting it" from "it is admitted and nothing has flushed it".
+ *
+ * Walks every held queue, so it belongs in a stall report and not in a round.
+ */
+void HTram::pendingItems(long long *held, long long *admitted,
+                         long long *buffered) const {
+  long long h = 0, a = 0, b = 0;
+#ifdef BUCKETS_BY_DEST
+  for (int d = 0; d < destCount(); d++) {
+    b += msgBuffers[d] ? msgBuffers[d]->next : 0;
+    a += updates_in_tram[d];
+    if (holds) {
+      for (int i = 0; i < histo_bucket_count; i++)
+        h += holds[d].live(i);
+    } else if (tram_hold[d]) {
+      for (int i = 0; i < histo_bucket_count; i++)
+        h += tram_hold[d][i].size();
+    }
+  }
+#else
+  for (int d = 0; d < CkNumNodes(); d++)
+    b += msgBuffers[d] ? msgBuffers[d]->next : 0;
+  a = updates_in_tram_count;
+  if (tram_hold)
+    for (int i = 0; i < histo_bucket_count; i++)
+      h += tram_hold[i].size();
+#endif
+  *held = h;
+  *admitted = a;
+  *buffered = b;
+}
+
 void HTram::coarsenBuckets(int k) {
   if (k < 2)
     return;

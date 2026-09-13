@@ -380,6 +380,11 @@ class HTram : public CBase_HTram {
     // the total absolute difference. Walks every held queue: a debugging aid
     // for diagnosis builds, not for a timed path.
     long long admittedDrift() const;
+    // Held / admitted / buffered item counts for this PE, for a client that
+    // has stopped making progress. Walks every held queue: a stall report,
+    // not a round.
+    void pendingItems(long long *held, long long *admitted,
+                      long long *buffered) const;
     void sanityCheck();
     void htramQuiesce(CkCallback cb);
     void onQD();

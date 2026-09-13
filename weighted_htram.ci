@@ -1,0 +1,36 @@
+mainmodule weighted
+{
+  include "weighted_node_struct.h";
+  extern module tramNonSmp;
+  group tramNonSmp<std::pair<int,int>>;
+  message tramNonSmpMsg<std::pair<int,int>>;
+  readonly CProxy_Main mainProxy;
+  readonly CProxy_WeightedArray arr;
+  readonly int N;
+  readonly int V;
+  readonly int imax;
+  readonly int average;
+  readonly tram_proxy_t tram_proxy; 
+  readonly int buffer_size;
+  readonly double flush_timer;
+  readonly bool enable_buffer_flushing;
+  mainchare Main
+  {
+    entry Main(CkArgMsg* m);
+    entry [reductiontarget] void begin(int result); //wait for all chares to receive graph partition, register qd callback here (callback to done method), start algorithm
+    entry void print(); //bcast to chares to print distances
+    entry [reductiontarget] void done(int result); //bcast to chares to print results and end program
+    entry [reductiontarget] void check_buffer_done(int empty_pes);
+  };
+  array [1D] WeightedArray
+  {
+    entry WeightedArray();
+    entry void initiate_pointers();
+    entry void get_graph(CkVec<LongEdge> edges, int partition[N], int N); //gets graph partition
+    entry void update_distances(std::pair<int,int> new_vertex_and_distance); //receives an updated vertex num and distance, and calls this method on neighbor chares
+    entry void check_buffer(); // checks for false quiescence
+    entry void keep_going(); // flush buffers
+    entry void print_distances(); // print out the distances on each chare
+  };
+
+};
