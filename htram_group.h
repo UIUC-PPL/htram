@@ -374,7 +374,11 @@ class HTram : public CBase_HTram {
     // is floor(distance / width) and which multiplies its width by k at the
     // same time, since floor(floor(x) / k) == floor(x / k). Not supported with
     // combining on.
-    void coarsenBuckets(int k);
+    // keep_top leaves the last bucket out of the merge: with the solver's
+    // clamp threshold frozen it is an overflow slot at a fixed distance,
+    // not an index, and merging it would move holds the solver's histogram
+    // no longer counts there.
+    void coarsenBuckets(int k, bool keep_top);
     // Recount what the admitted counters should hold -- held items at or
     // below the threshold plus everything sitting in the buffer -- and return
     // the total absolute difference. Walks every held queue: a debugging aid

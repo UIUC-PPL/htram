@@ -472,7 +472,7 @@ void HTram::pendingItems(long long *held, long long *admitted,
   *buffered = b;
 }
 
-void HTram::coarsenBuckets(int k) {
+void HTram::coarsenBuckets(int k, bool keep_top) {
   if (k < 2)
     return;
 #ifdef BUCKETS_BY_DEST
@@ -480,14 +480,15 @@ void HTram::coarsenBuckets(int k) {
     CkAbort("htram: coarsenBuckets is not supported with combining on");
 #endif
   const int new_tram = tram_threshold / k;
-  const int admit_below = std::min((new_tram + 1) * k, histo_bucket_count);
+  const int merged_top = keep_top ? histo_bucket_count - 1 : histo_bucket_count;
+  const int admit_below = std::min((new_tram + 1) * k, merged_top);
 #ifdef BUCKETS_BY_DEST
   for (int d = 0; d < destCount(); d++) {
     if (!tram_hold[d])
       continue;
     for (int i = tram_threshold + 1; i < admit_below; i++)
       updates_in_tram[d] += tram_hold[d][i].size();
-    for (int i = 1; i < histo_bucket_count; i++) {
+    for (int i = 1; i < merged_top; i++) {
       std::queue<datatype> &src = tram_hold[d][i];
       std::queue<datatype> &dst = tram_hold[d][i / k];
       while (!src.empty()) {
@@ -499,7 +500,7 @@ void HTram::coarsenBuckets(int k) {
 #else
   for (int i = tram_threshold + 1; i < admit_below; i++)
     updates_in_tram_count += tram_hold[i].size();
-  for (int i = 1; i < histo_bucket_count; i++) {
+  for (int i = 1; i < merged_top; i++) {
     std::queue<datatype> &src = tram_hold[i];
     std::queue<datatype> &dst = tram_hold[i / k];
     while (!src.empty()) {
