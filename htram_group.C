@@ -55,6 +55,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
   // varsize now, so this is a live runtime knob.
   CkAssert(buffer_size > 0 && buffer_size <= BUFSIZE);
   bufSize = buffer_size;
+  updateReleaseLevel();
 
 #ifdef BUCKETS_BY_DEST
   nodesize = CkNodeSize(0);
@@ -94,6 +95,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
 #endif
 
   myPE = CkMyPe();
+  num_dest = destCount();
   msgBuffers = new HTramMessage *[CkNumPes()];
 
   if (thisIndex == 0) {
@@ -191,6 +193,7 @@ void HTram::setBufferSize(int new_size) {
     msgBuffers[i] = newHTramMessage(new_size);
   }
   bufSize = new_size;
+  updateReleaseLevel();
 }
 
 bool HTram::idleFlush() {
@@ -206,6 +209,7 @@ void HTram::reset_stats(int btype, int buf_size, int agtype) {
   std::fill_n(nodeGrp->msg_stats, STATS_COUNT, 0.0);
   nodeGrp->msg_stats[MIN_LATENCY] = 100.0;
   agg = agtype;
+  num_dest = destCount();
   // agg may have just widened from nodes to PEs, so back-fill anything the
   // constructor did not allocate before refreshing the buffers.
   for (int i = 0; i < destCount(); i++) {
@@ -234,6 +238,7 @@ HTram::HTram(CkGroupID cgid, CkCallback ecb) {
   endCb = ecb;
   myPE = CkMyPe();
   bufSize = BUFSIZE; // this constructor takes no buffer size
+  updateReleaseLevel();
   local_idx.reset(new int[CkNumNodes()]);
   for (int i = 0; i < CkNumNodes(); i++)
     local_idx[i] = 0;
@@ -319,6 +324,7 @@ void HTram::changeThreshold(int _directThreshold, int _newtramThreshold,
   tram_threshold = _newtramThreshold;
   direct_threshold = _directThreshold;
   selectivity = _selectivity;
+  updateReleaseLevel();
   for (int dest_node = 0; dest_node < num_dest; dest_node++)
     if (updates_in_tram[dest_node] > selectivity * bufSize) {
       if (holds)
@@ -343,6 +349,7 @@ void HTram::changeThreshold(int _directThreshold, int _newtramThreshold,
   tram_threshold = _newtramThreshold;
   direct_threshold = _directThreshold;
   selectivity = _selectivity;
+  updateReleaseLevel();
   if (updates_in_tram_count > selectivity * bufSize * CkNumNodes())
     insertBuckets(tram_threshold);
 }
@@ -350,13 +357,15 @@ void HTram::changeThreshold(int _directThreshold, int _newtramThreshold,
 
 #ifdef BUCKETS_BY_DEST
 void HTram::sendItemPrioDeferredDest(datatype new_update, int neighbor_bucket) {
-  int dest_proc = get_dest_proc(objPtr, new_update);
-  int dest_node = dest_proc / nodesize;
-  if (agg == WW)
-    dest_node = dest_proc;
-  int num_dest = CkNumNodes();
-  if (agg == WW)
-    num_dest = CkNumPes();
+  sendItemPrioDeferredDest(new_update, neighbor_bucket,
+                           get_dest_proc(objPtr, new_update));
+}
+
+void HTram::sendItemPrioDeferredDest(datatype new_update, int neighbor_bucket,
+                                     int dest_proc) {
+  // nodeOf[] is dest_proc / nodesize, tabulated: this runs once per item, and
+  // the division was a measurable share of the whole solve.
+  const int dest_node = (agg == WW) ? dest_proc : nodeOf[dest_proc];
   if (dest_node < 0 || dest_node >= num_dest) {
     CkPrintf("\nError");
     CkAbort("err");
@@ -377,7 +386,7 @@ void HTram::sendItemPrioDeferredDest(datatype new_update, int neighbor_bucket) {
       else if (was_admitted && !admitted)
         updates_in_tram[dest_node]--;
     }
-    if (updates_in_tram[dest_node] >= selectivity * bufSize)
+    if (updates_in_tram[dest_node] >= release_level)
       releaseFull(dest_node);
     return;
   }
@@ -388,10 +397,10 @@ void HTram::sendItemPrioDeferredDest(datatype new_update, int neighbor_bucket) {
     if (neighbor_bucket > direct_threshold) {
       tram_hold[dest_node][neighbor_bucket].push(new_update);
     } else {
-      insertValueWPs(new_update, dest_proc);
+      insertValueWPsTo(new_update, dest_proc, dest_node);
     }
   }
-  if (updates_in_tram[dest_node] > selectivity * bufSize)
+  if (updates_in_tram[dest_node] > release_level)
     insertBucketsByDest(tram_threshold, dest_node);
 }
 #else
@@ -531,9 +540,7 @@ void HTram::insertBucketsByDest(int high, int dest_node) {
     while (!tram_hold[dest_node][i].empty()) {
       datatype item = tram_hold[dest_node][i].front();
       tram_hold[dest_node][i].pop();
-      destMsg->items()[destMsg->next].payload = item;
-      int dest_proc = get_dest_proc(objPtr, item);
-      destMsg->items()[destMsg->next].destPe = dest_proc;
+      setItem(destMsg->items()[destMsg->next], item, destForItem(item));
       destMsg->next++;
       if (destMsg->next == bufSize) {
         tot_send_count += destMsg->next;
@@ -547,7 +554,7 @@ void HTram::insertBucketsByDest(int high, int dest_node) {
         msgBuffers[dest_node] = newHTramMessage(bufSize);
         destMsg = msgBuffers[dest_node];
       }
-      if (updates_in_tram[dest_node] < selectivity * bufSize)
+      if (updates_in_tram[dest_node] < release_level)
         break;
     }
   }
@@ -566,8 +573,7 @@ void HTram::insertBuckets(int high) {
       int dest_proc = get_dest_proc(objPtr, item);
       int dest_node = dest_proc / CkNodeSize(0);
       HTramMessage *destMsg = msgBuffers[dest_node];
-      destMsg->items()[destMsg->next].payload = item;
-      destMsg->items()[destMsg->next].destPe = dest_proc;
+      setItem(destMsg->items()[destMsg->next], item, dest_proc);
       destMsg->next++;
       if (destMsg->next == bufSize) {
         tot_send_count += destMsg->next;
@@ -589,12 +595,15 @@ void HTram::insertBuckets(int high) {
 #endif
 
 void HTram::insertValueWPs(datatype value, int dest_pe) {
-  int destNode = dest_pe / nodesize;
-  if (agg == WW)
-    destNode = dest_pe;
+  insertValueWPsTo(value, dest_pe,
+                   (agg == WW) ? dest_pe
+                   : nodeOf    ? nodeOf[dest_pe]
+                               : dest_pe / nodesize);
+}
+
+void HTram::insertValueWPsTo(datatype value, int dest_pe, int destNode) {
   HTramMessage *destMsg = msgBuffers[destNode];
-  destMsg->items()[destMsg->next].payload = value;
-  destMsg->items()[destMsg->next].destPe = dest_pe;
+  setItem(destMsg->items()[destMsg->next], value, dest_pe);
   destMsg->next++;
   if (destMsg->next == bufSize) {
     agg_msg_count++;
@@ -618,7 +627,7 @@ void HTram::insertValueWPs(datatype value, int dest_pe) {
 // Client inserts
 void HTram::insertToProcess(datatype value, int destNode) {
   HTramMessage *destMsg = msgBuffers[destNode];
-  destMsg->items()[destMsg->next].payload = value;
+  setItem(destMsg->items()[destMsg->next], value, -1);
   destMsg->next++;
   if (destMsg->next == bufSize) {
     trim(destMsg);
@@ -634,8 +643,7 @@ void HTram::insertValue(datatype value, int dest_pe) {
     int increment = 1;
     int idx_dnode = local_idx[destNode];
     if (idx_dnode <= LOCAL_BUFSIZE - 1) {
-      local_buf[destNode]->items()[idx_dnode].payload = value;
-      local_buf[destNode]->items()[idx_dnode].destPe = dest_pe;
+      setItem(local_buf[destNode]->items()[idx_dnode], value, dest_pe);
       local_idx[destNode]++;
     }
     bool local_buf_full = false;
@@ -650,13 +658,11 @@ void HTram::insertValue(datatype value, int dest_pe) {
       destMsg = msgBuffers[dest_pe];
 
     if (agg == WsP) {
-      itemT itm = {dest_pe, value};
+      itemT itm;
+      setItem(itm, value, dest_pe);
       localBuffers[dest_pe].push_back(itm);
-    } else if (agg == WW) {
-      destMsg->items()[destMsg->next].payload = value;
     } else {
-      destMsg->items()[destMsg->next].payload = value;
-      destMsg->items()[destMsg->next].destPe = dest_pe;
+      setItem(destMsg->items()[destMsg->next], value, dest_pe);
     }
 
     destMsg->next++;
@@ -715,10 +721,8 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
   }
   int i;
   for (i = 0; i < increment; i++) {
-    srcNodeGrp->msgBuffers[destnode]->items()[idx + i].payload =
-        local_buf[destnode]->items()[i].payload;
-    srcNodeGrp->msgBuffers[destnode]->items()[idx + i].destPe =
-        local_buf[destnode]->items()[i].destPe;
+    srcNodeGrp->msgBuffers[destnode]->items()[idx + i] =
+        local_buf[destnode]->items()[i];
   }
   int done_count = srcNodeGrp->done_count[destnode].fetch_add(
       increment, std::memory_order_relaxed);
@@ -886,10 +890,8 @@ void HTram::tflush(bool idleflush) {
         for (int i = 0; i <= tram_threshold; i++) {
           while (!tram_hold[dest_node][i].empty()) {
             datatype item = tram_hold[dest_node][i].front();
-            int dest_proc = get_dest_proc(objPtr, item);
             tram_hold[dest_node][i].pop();
-            destMsg->items()[destMsg->next].payload = item;
-            destMsg->items()[destMsg->next].destPe = dest_proc;
+            setItem(destMsg->items()[destMsg->next], item, destForItem(item));
             destMsg->next++;
             if (destMsg->next == bufSize) {
               tot_send_count += destMsg->next;
@@ -918,9 +920,7 @@ void HTram::tflush(bool idleflush) {
             while (!tram_hold[node][i].empty()) {
               datatype item = tram_hold[node][i].front();
               tram_hold[node][i].pop();
-              int dest_proc = get_dest_proc(objPtr, item);
-              destMsg->items()[destMsg->next].payload = item;
-              destMsg->items()[destMsg->next].destPe = dest_proc;
+              setItem(destMsg->items()[destMsg->next], item, destForItem(item));
               destMsg->next++;
               if (destMsg->next >= bufSize / 2)
                 break;
@@ -984,7 +984,7 @@ void HTram::shipBuffer(int dest, bool full) {
 // dest, fill a buffer from the lowest buckets and ship it. Items leave the
 // hold only here or in a flush, so everything still waiting can be folded.
 void HTram::releaseFull(int dest) {
-  while (updates_in_tram[dest] >= selectivity * bufSize) {
+  while (updates_in_tram[dest] >= release_level) {
     HTramMessage *m = msgBuffers[dest];
     holds[dest].release(tram_threshold, bufSize - m->next,
                         [&](void *item) { appendHeld(m, item); });
@@ -1030,8 +1030,7 @@ void HTram::flushDest(int dest) {
     while (!tram_hold[dest][i].empty()) {
       datatype item = tram_hold[dest][i].front();
       tram_hold[dest][i].pop();
-      destMsg->items()[destMsg->next].payload = item;
-      destMsg->items()[destMsg->next].destPe = get_dest_proc(objPtr, item);
+      setItem(destMsg->items()[destMsg->next], item, destForItem(item));
       destMsg->next++;
       if (destMsg->next == bufSize) {
         tot_send_count += destMsg->next;
@@ -1057,8 +1056,7 @@ void HTram::flushDest(int dest) {
       while (!tram_hold[dest][i].empty() && destMsg->next < bufSize / 2) {
         datatype item = tram_hold[dest][i].front();
         tram_hold[dest][i].pop();
-        destMsg->items()[destMsg->next].payload = item;
-        destMsg->items()[destMsg->next].destPe = get_dest_proc(objPtr, item);
+        setItem(destMsg->items()[destMsg->next], item, destForItem(item));
         destMsg->next++;
       }
     }
@@ -1211,19 +1209,19 @@ void HTram::receivePerPE(HTramMessage *msg) {
   int pe = CkMyPe();
   // Items are pre-sorted by destPe; find this PE's contiguous range.
   int llimit = 0;
-  while (llimit < msg->next && msg->items()[llimit].destPe < pe)
+  while (llimit < msg->next && itemDestPe(msg->items()[llimit]) < pe)
     llimit++;
   int ulimit = llimit;
-  while (ulimit < msg->next && msg->items()[ulimit].destPe == pe)
+  while (ulimit < msg->next && itemDestPe(msg->items()[ulimit]) == pe)
     ulimit++;
   int count = ulimit - llimit;
   if (!ret_list) {
     for (int i = llimit; i < ulimit; i++)
-      cb(objPtr, msg->items()[i].payload);
+      cb(objPtr, itemPayload(msg->items()[i]));
   } else {
     datatype *buf = new datatype[count];
     for (int i = 0; i < count; i++)
-      buf[i] = msg->items()[llimit + i].payload;
+      buf[i] = itemPayload(msg->items()[llimit + i]);
     cb_retarr(objPtr, buf, count);
     delete[] buf;
   }
@@ -1237,11 +1235,11 @@ void HTram::receiveOnPE(HTramMessage *msg) {
 
   if (!ret_list) {
     for (int i = 0; i < msg->next; i++)
-      cb(objPtr, msg->items()[i].payload);
+      cb(objPtr, itemPayload(msg->items()[i]));
   } else {
     datatype *buf = new datatype[msg->next];
     for (int i = 0; i < msg->next; i++)
-      buf[i] = msg->items()[i].payload;
+      buf[i] = itemPayload(msg->items()[i]);
     cb_retarr(objPtr, buf, msg->next);
   }
   delete msg;
@@ -1262,7 +1260,7 @@ void HTramRecv::receiveOnProc(HTramMessage *agg_message) {
 #ifndef BUCKETS_BY_DEST
   datatype *buf = new datatype[agg_message->next];
   for (int i = 0; i < agg_message->next; i++)
-    buf[i] = agg_message->items()[i].payload;
+    buf[i] = itemPayload(agg_message->items()[i]);
   cb_retarr(objPtr, buf, agg_message->next);
   delete agg_message;
 #else
@@ -1288,21 +1286,30 @@ void HTramRecv::receive(HTramMessage *agg_message) {
 
   std::vector<int> sizes(CkNodeSize(CkMyNode()), 0);
 
-  for (int i = 0; i < agg_message->next; i++) {
-    int rank = agg_message->items()[i].destPe - rank0PE;
-    sizes[rank]++;
-  }
+  // Each item's local rank, computed once: carried on the wire, or, under
+  // compact wire items, recomputed from the payload by this PE's client.
+  static thread_local std::vector<int> ranks;
+  const int count = agg_message->next;
+  ranks.resize(count);
+#if HTRAM_ITEMS_CARRY_DEST
+  for (int i = 0; i < count; i++)
+    ranks[i] = itemDestPe(agg_message->items()[i]) - rank0PE;
+#else
+  HTram *local = tram_proxy.ckLocalBranch();
+  for (int i = 0; i < count; i++)
+    ranks[i] = local->destPeOf(itemPayload(agg_message->items()[i])) - rank0PE;
+#endif
+  for (int i = 0; i < count; i++)
+    sizes[ranks[i]]++;
 
   sorted_agg_message->offset[0] = 0;
   for (int i = 1; i < CkNodeSize(CkMyNode()); i++)
     sorted_agg_message->offset[i] =
         sorted_agg_message->offset[i - 1] + sizes[i - 1];
 
-  for (int i = 0; i < agg_message->next; i++) {
-    int rank = agg_message->items()[i].destPe - rank0PE;
-    sorted_agg_message->items()[sorted_agg_message->offset[rank]++] =
-        agg_message->items()[i].payload;
-  }
+  for (int i = 0; i < count; i++)
+    sorted_agg_message->items()[sorted_agg_message->offset[ranks[i]]++] =
+        itemPayload(agg_message->items()[i]);
   delete agg_message;
 
   sorted_agg_message->offset[0] = sizes[0];
@@ -1334,7 +1341,7 @@ void HTramRecv::receive_small(HTramLocalMessage *agg_message) {
   std::vector<int> sizes(CkNodeSize(CkMyNode()), 0);
 
   for (int i = 0; i < agg_message->next; i++) {
-    int rank = agg_message->items()[i].destPe - rank0PE;
+    int rank = itemDestPe(agg_message->items()[i]) - rank0PE;
     sizes[rank]++;
   }
 
@@ -1344,9 +1351,9 @@ void HTramRecv::receive_small(HTramLocalMessage *agg_message) {
         sorted_agg_message->offset[i - 1] + sizes[i - 1];
 
   for (int i = 0; i < agg_message->next; i++) {
-    int rank = agg_message->items()[i].destPe - rank0PE;
+    int rank = itemDestPe(agg_message->items()[i]) - rank0PE;
     sorted_agg_message->items()[sorted_agg_message->offset[rank]++] =
-        agg_message->items()[i].payload;
+        itemPayload(agg_message->items()[i]);
   }
   delete agg_message;
 

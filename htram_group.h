@@ -49,7 +49,12 @@ typedef std::queue<datatype>** array2d_of_queues;
 #include <memory>
 using namespace std;
 #define SIZE_LIST (int[]){1024, 512, 2048}
-#define BUFSIZE 2048 //max num of items allocated in a buffer
+// Largest buffer, in items, a run may ask for (the buffer itself is allocated
+// at the size asked for). 16384 so that compact 8-byte items can fill the same
+// ~48 KB messages that 2048 wide items did; see step 7.6j.
+#ifndef BUFSIZE
+#define BUFSIZE 16384
+#endif
 #define LOCAL_BUFSIZE 16
 
 #define TOTAL_LATENCY 0
@@ -70,6 +75,30 @@ using namespace std;
 #define PP  2
 #define WW  3
 
+#if defined(GRAPH) && defined(HTRAM_COMPACT_WIRE)
+// Compact wire items (step 7.6j). The solve on two nodes was bound by the
+// bytes htram moved, not by the work per update: doubling the item at a fixed
+// message count cost 1.77x, tripling the message count at a fixed byte count
+// cost 1.08x. So an item is only what the receiver cannot recompute -- the
+// graph header's 8-byte WireUpdate -- and the destination PE, which is a
+// function of the vertex, is recomputed on arrival by the receiving process
+// (HTramRecv::receive) instead of being carried. Only WPs aggregation, which is
+// what the graph client uses, sorts on arrival; the modes that read a carried
+// destination abort.
+struct itemT {
+  WireUpdate wire;
+};
+#define HTRAM_ITEMS_CARRY_DEST 0
+inline void setItem(itemT &it, const datatype &value, int) {
+  it.wire = wire_pack(value);
+}
+inline datatype itemPayload(const itemT &it) { return wire_unpack(it.wire); }
+inline int itemDestPe(const itemT &) {
+  CkAbort("htram: compact wire items carry no destination PE; "
+          "only WPs aggregation is supported with HTRAM_COMPACT_WIRE");
+  return -1;
+}
+#else
 template <typename T>
 struct item {
   int destPe;
@@ -77,6 +106,14 @@ struct item {
 };
 
 typedef item<datatype> itemT;
+#define HTRAM_ITEMS_CARRY_DEST 1
+inline void setItem(itemT &it, const datatype &value, int dest_pe) {
+  it.payload = value;
+  it.destPe = dest_pe;
+}
+inline datatype itemPayload(const itemT &it) { return it.payload; }
+inline int itemDestPe(const itemT &it) { return it.destPe; }
+#endif
 
 // The payload of every htram message is a genuine varsize array, declared as
 // raw bytes in the .ci and viewed through a typed accessor here. The generated
@@ -251,6 +288,14 @@ class HTram : public CBase_HTram {
     int histo_bucket_count, direct_threshold = 0, tram_threshold = 0;
     int num_nodes;
     float selectivity = 1.0;
+    // selectivity * bufSize: the admitted count at which a destination's hold
+    // is released. Every insert compared against the product, so it is formed
+    // once, whenever either factor changes (updateReleaseLevel). Stored as the
+    // same float the expression produced, so every comparison is unchanged.
+    float release_level = 1.0;
+    void updateReleaseLevel() { release_level = selectivity * bufSize; }
+    // destCount(), which calls into the runtime, read on every insert.
+    int num_dest = 0;
     bool ret_list;
     bool request;
     double flush_time;
@@ -282,8 +327,7 @@ class HTram : public CBase_HTram {
     void appendHeld(HTramMessage *m, const void *item) {
       datatype value;
       std::memcpy(&value, item, sizeof(datatype));
-      m->items()[m->next].payload = value;
-      m->items()[m->next].destPe = get_dest_proc(objPtr, value);
+      setItem(m->items()[m->next], value, destForItem(value));
       m->next++;
     }
 #else
@@ -307,7 +351,16 @@ class HTram : public CBase_HTram {
     // clock, and those two differed by up to 4x before messages were varsize.
     void trim(HTramMessage *m);
 
+    // The destination PE an item carries on the wire, or nothing when the
+    // layout does not carry one (the lookup is then compiled away).
+    int destForItem(const datatype &value) {
+      return HTRAM_ITEMS_CARRY_DEST ? get_dest_proc(objPtr, value) : -1;
+    }
+
   public:
+    // For the receiving process under compact wire items: which PE an item is
+    // for. Reads only the client's partition tables, so any PE's branch will do.
+    int destPeOf(const datatype &value) { return get_dest_proc(objPtr, value); }
     bool enable_flush;
     int bufSize;
     int prevBufSize;
@@ -333,8 +386,14 @@ class HTram : public CBase_HTram {
     void copyToNodeBuf(int destnode, int increment);
     void insertValue(datatype send_value, int dest_pe);
     void insertValueWPs(datatype send_value, int dest_pe);
+    void insertValueWPsTo(datatype send_value, int dest_pe, int dest_node);
     void insertToProcess(datatype item, int logicNodeNum);
     void sendItemPrioDeferredDest(datatype new_update, int neighbor_bucket);
+    // The same, for a client that already knows the destination PE: the
+    // 2-argument form asks get_dest_proc for it, which the GRAPH client had
+    // just computed for its own purposes.
+    void sendItemPrioDeferredDest(datatype new_update, int neighbor_bucket,
+                                  int dest_proc);
     void reset_stats(int buf_type, int buf_size, int agtype);
     void enableIdleFlush();
     void tflush(bool idleflush = false);
