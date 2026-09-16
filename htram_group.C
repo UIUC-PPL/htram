@@ -180,6 +180,34 @@ void HTram::setBufferSize(int new_size) {
   CkAssert(new_size > 0 && new_size <= BUFSIZE);
   if (new_size == bufSize)
     return;
+#ifdef BUCKETS_BY_DEST
+  // Per-destination buffers can change size mid-run, which is what a client
+  // steering the size from its own feedback needs. Every fill site sends when
+  // next reaches bufSize exactly, so two invariants must hold on return: each
+  // buffer can hold bufSize items, and none already holds that many. A buffer
+  // that is too small is copied into a larger one; one that is already at or
+  // past a smaller size leaves now, as a full send would have.
+  if (!holds && (agg == WPs || agg == WW)) {
+    bufSize = new_size;
+    updateReleaseLevel();
+    for (int d = 0; d < destCount(); d++) {
+      HTramMessage *m = msgBuffers[d];
+      if (m->cap < bufSize) {
+        HTramMessage *g = newHTramMessage(bufSize);
+        std::copy(m->items(), m->items() + m->next, g->items());
+        g->next = m->next;
+        delete m;
+        msgBuffers[d] = g;
+      } else if (m->next >= bufSize) {
+        updates_in_tram[d] -= m->next;
+        shipBuffer(d, true);
+      }
+      if (updates_in_tram[d] > release_level)
+        insertBucketsByDest(tram_threshold, d);
+    }
+    return;
+  }
+#endif
   // Buffers are allocated at exactly the capacity they need now, so raising
   // bufSize past an existing buffer's capacity would overrun it. Reallocate
   // instead of trusting the caller to have drained first; refuse outright if
