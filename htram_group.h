@@ -1,5 +1,8 @@
 #ifndef __HTRAM_H__
 #define __HTRAM_H__
+#ifdef ACIC_COMM_SHARE
+extern thread_local unsigned long htram_send_tsc; // htram_group.C
+#endif
 //#define SRC_GROUPING
 //#define PER_DESTPE_BUFFER
 //#define NODE_SRC_BUFFER

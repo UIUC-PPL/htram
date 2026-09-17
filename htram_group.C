@@ -3,6 +3,22 @@
 #include <thread>
 #include <mutex>
 
+// ACIC_COMM_SHARE (step 7.6o): time spent handing buffers to Charm++, per
+// thread, so a client can split its own time into work and sends. One rdtsc
+// pair per message sent.
+#ifdef ACIC_COMM_SHARE
+#include <x86intrin.h>
+thread_local unsigned long htram_send_tsc = 0;
+#define HTRAM_TIMED_SEND(stmt)                   \
+  do {                                           \
+    const unsigned long htram_t0_ = __rdtsc();   \
+    stmt                                         \
+    htram_send_tsc += __rdtsc() - htram_t0_;     \
+  } while (0);
+#else
+#define HTRAM_TIMED_SEND(stmt) stmt
+#endif
+
 //#define DEBUG 1
 
 CkReductionMsg *msgStatsCollection(int nMsg, CkReductionMsg **rdmsgs) {
@@ -576,9 +592,9 @@ void HTram::insertBucketsByDest(int high, int dest_node) {
         noteFullSend(dest_node);
         trim(destMsg);
         if (agg == WW)
-          thisProxy[dest_node].receiveOnPE(destMsg);
+          HTRAM_TIMED_SEND(thisProxy[dest_node].receiveOnPE(destMsg);)
         else
-          nodeGrpProxy[dest_node].receive(destMsg);
+          HTRAM_TIMED_SEND(nodeGrpProxy[dest_node].receive(destMsg);)
         msgBuffers[dest_node] = newHTramMessage(bufSize);
         destMsg = msgBuffers[dest_node];
       }
@@ -607,7 +623,7 @@ void HTram::insertBuckets(int high) {
         tot_send_count += destMsg->next;
         updates_in_tram_count -= destMsg->next;
         trim(destMsg);
-        nodeGrpProxy[dest_node].receive(destMsg);
+        HTRAM_TIMED_SEND(nodeGrpProxy[dest_node].receive(destMsg);)
         msgBuffers[dest_node] = newHTramMessage(bufSize);
       }
       if (updates_in_tram_count < selectivity * bufSize * num_nodes)
@@ -644,9 +660,9 @@ void HTram::insertValueWPsTo(datatype value, int dest_pe, int destNode) {
 #endif
     trim(destMsg);
     if (agg == WW)
-      thisProxy[destNode].receiveOnPE(destMsg);
+      HTRAM_TIMED_SEND(thisProxy[destNode].receiveOnPE(destMsg);)
     else
-      nodeGrpProxy[destNode].receive(destMsg);
+      HTRAM_TIMED_SEND(nodeGrpProxy[destNode].receive(destMsg);)
     msgBuffers[destNode] = newHTramMessage(bufSize);
   }
 }
@@ -659,7 +675,7 @@ void HTram::insertToProcess(datatype value, int destNode) {
   destMsg->next++;
   if (destMsg->next == bufSize) {
     trim(destMsg);
-    nodeGrpProxy[destNode].receiveOnProc(destMsg);
+    HTRAM_TIMED_SEND(nodeGrpProxy[destNode].receiveOnProc(destMsg);)
     msgBuffers[destNode] = newHTramMessage(bufSize);
   }
 }
@@ -712,11 +728,11 @@ void HTram::insertValue(datatype value, int dest_pe) {
         noteFullSend(dest_pe);
 #endif
         trim(destMsg);
-        thisProxy[dest_pe].receiveOnPE(destMsg);
+        HTRAM_TIMED_SEND(thisProxy[dest_pe].receiveOnPE(destMsg);)
         msgBuffers[dest_pe] = newHTramMessage(bufSize);
       } else if (agg == WsP) {
         trim(destMsg);
-        nodeGrpProxy[destNode].receive_no_sort(destMsg);
+        HTRAM_TIMED_SEND(nodeGrpProxy[destNode].receive_no_sort(destMsg);)
         msgBuffers[destNode] = newHTramMessage(bufSize);
       } else {
         tot_send_count += destMsg->next;
@@ -727,7 +743,7 @@ void HTram::insertValue(datatype value, int dest_pe) {
         updates_in_tram_count -= destMsg->next;
 #endif
         trim(destMsg);
-        nodeGrpProxy[destNode].receive(destMsg);
+        HTRAM_TIMED_SEND(nodeGrpProxy[destNode].receive(destMsg);)
         msgBuffers[destNode] = newHTramMessage(bufSize);
       }
     }
@@ -778,7 +794,7 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
     agg_msg_count++;
     srcNodeGrp->msgBuffers[destnode]->next = bufSize;
     trim(srcNodeGrp->msgBuffers[destnode]);
-    nodeGrpProxy[destnode].receive(srcNodeGrp->msgBuffers[destnode]);
+    HTRAM_TIMED_SEND(nodeGrpProxy[destnode].receive(srcNodeGrp->msgBuffers[destnode]);)
     srcNodeGrp->msgBuffers[destnode] = newHTramMessage(BUFSIZE + LOCAL_BUFSIZE);
     srcNodeGrp->done_count[destnode] = 0;
     srcNodeGrp->get_idx[destnode] = 0;
@@ -813,7 +829,7 @@ void HTram::tflush(bool idleflush) {
       local_buf[i]->next = local_idx[i];
       ((envelope *)UsrToEnv(local_buf[i]))
           ->setUsersize(local_buf[i]->usedBytes());
-      nodeGrpProxy[i].receive_small(local_buf[i]);
+      HTRAM_TIMED_SEND(nodeGrpProxy[i].receive_small(local_buf[i]);)
       local_buf[i] = newHTramLocalMessage(LOCAL_BUFSIZE);
       local_idx[i] = 0;
     }
@@ -849,7 +865,7 @@ void HTram::tflush(bool idleflush) {
 #endif
           srcNodeGrp->msgBuffers[i]->next = srcNodeGrp->done_count[i];
           trim(srcNodeGrp->msgBuffers[i]);
-          nodeGrpProxy[i].receive(srcNodeGrp->msgBuffers[i]);
+          HTRAM_TIMED_SEND(nodeGrpProxy[i].receive(srcNodeGrp->msgBuffers[i]);)
           srcNodeGrp->msgBuffers[i] = newHTramMessage(BUFSIZE + LOCAL_BUFSIZE);
           srcNodeGrp->done_count[i] = 0;
           srcNodeGrp->flush_count = 0;
@@ -882,7 +898,7 @@ void HTram::tflush(bool idleflush) {
             localBuffers[destNode * CkNodeSize(0) + k].clear();
           }
           trim(destMsg);
-          nodeGrpProxy[i].receive_no_sort(destMsg);
+          HTRAM_TIMED_SEND(nodeGrpProxy[i].receive_no_sort(destMsg);)
           msgBuffers[i] = newHTramMessage(bufSize);
         } else if (agg == WPs) {
 #ifdef BUCKETS_BY_DEST
@@ -892,14 +908,14 @@ void HTram::tflush(bool idleflush) {
           updates_in_tram[i] -= destMsg->next;
 #endif
           trim(destMsg);
-          nodeGrpProxy[i].receive(destMsg);
+          HTRAM_TIMED_SEND(nodeGrpProxy[i].receive(destMsg);)
           msgBuffers[i] = newHTramMessage(bufSize);
         } else if (agg == WW) {
 #ifdef BUCKETS_BY_DEST
           updates_in_tram[i] -= destMsg->next;
 #endif
           trim(destMsg);
-          thisProxy[i].receiveOnPE(destMsg);
+          HTRAM_TIMED_SEND(thisProxy[i].receiveOnPE(destMsg);)
           msgBuffers[i] = newHTramMessage(bufSize);
         }
       }
@@ -926,9 +942,9 @@ void HTram::tflush(bool idleflush) {
               updates_in_tram[dest_node] -= destMsg->next;
               trim(destMsg);
               if (agg == WW)
-                thisProxy[dest_node].receiveOnPE(destMsg);
+                HTRAM_TIMED_SEND(thisProxy[dest_node].receiveOnPE(destMsg);)
               else
-                nodeGrpProxy[dest_node].receive(destMsg);
+                HTRAM_TIMED_SEND(nodeGrpProxy[dest_node].receive(destMsg);)
               msgBuffers[dest_node] = newHTramMessage(bufSize);
               destMsg = msgBuffers[dest_node];
             }
@@ -961,9 +977,9 @@ void HTram::tflush(bool idleflush) {
         tot_send_count += destMsg->next;
         trim(destMsg);
         if (agg == WW)
-          thisProxy[node].receiveOnPE(destMsg);
+          HTRAM_TIMED_SEND(thisProxy[node].receiveOnPE(destMsg);)
         else
-          nodeGrpProxy[node].receive(destMsg);
+          HTRAM_TIMED_SEND(nodeGrpProxy[node].receive(destMsg);)
         msgBuffers[node] = newHTramMessage(bufSize);
       }
   }
@@ -1002,9 +1018,9 @@ void HTram::shipBuffer(int dest, bool full) {
     noteFullSend(dest);
   trim(m);
   if (agg == WW)
-    thisProxy[dest].receiveOnPE(m);
+    HTRAM_TIMED_SEND(thisProxy[dest].receiveOnPE(m);)
   else
-    nodeGrpProxy[dest].receive(m);
+    HTRAM_TIMED_SEND(nodeGrpProxy[dest].receive(m);)
   msgBuffers[dest] = newHTramMessage(bufSize);
 }
 
@@ -1065,9 +1081,9 @@ void HTram::flushDest(int dest) {
         updates_in_tram[dest] -= destMsg->next;
         trim(destMsg);
         if (agg == WW)
-          thisProxy[dest].receiveOnPE(destMsg);
+          HTRAM_TIMED_SEND(thisProxy[dest].receiveOnPE(destMsg);)
         else
-          nodeGrpProxy[dest].receive(destMsg);
+          HTRAM_TIMED_SEND(nodeGrpProxy[dest].receive(destMsg);)
         msgBuffers[dest] = newHTramMessage(bufSize);
         destMsg = msgBuffers[dest];
       }
@@ -1092,9 +1108,9 @@ void HTram::flushDest(int dest) {
     tot_send_count += destMsg->next;
     trim(destMsg);
     if (agg == WW)
-      thisProxy[dest].receiveOnPE(destMsg);
+      HTRAM_TIMED_SEND(thisProxy[dest].receiveOnPE(destMsg);)
     else
-      nodeGrpProxy[dest].receive(destMsg);
+      HTRAM_TIMED_SEND(nodeGrpProxy[dest].receive(destMsg);)
     msgBuffers[dest] = newHTramMessage(bufSize);
   }
 }
