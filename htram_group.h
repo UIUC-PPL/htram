@@ -450,6 +450,10 @@ class HTram : public CBase_HTram {
     double idle_flush_interval = 0.0;
     double last_idle_flush = -1.0;
     void setIdleFlushInterval(double seconds) { idle_flush_interval = seconds; }
+    // Node-level receive: deliver only to PEs that get items (see
+    // HTramRecv::receive).
+    bool skip_empty_deliveries = false;
+    void setSkipEmptyDeliveries(bool on) { skip_empty_deliveries = on; }
     unsigned long long stale_flushes = 0; // destinations flushed by flushStale
     unsigned long long idle_flushes = 0;  // destinations flushed by flushIdle
     // Turn on source-side combining. Must be called before the first send.

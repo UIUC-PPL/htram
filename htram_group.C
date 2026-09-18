@@ -1399,12 +1399,23 @@ void HTramRecv::receive(HTramMessage *agg_message) {
     sorted_agg_message->offset[i] =
         sorted_agg_message->offset[i - 1] + sizes[i];
 
-  for (int i = CkNodeFirst(CkMyNode());
-       i < CkNodeFirst(CkMyNode()) + CkNodeSize(CkMyNode()); i++) {
+  // With skip_empty_deliveries, only the PEs this message carries items for.
+  // At 8 nodes a message averages ~70 items over 15 PEs, so most deliveries
+  // are a scheduler pass and a handler for nothing, and skipping them made
+  // orkut 1.1x faster. It is off by default because those empty deliveries
+  // also sit in each PE's FIFO ahead of its heap-pass continuations, and a
+  // high-diameter solve depends on that: mesh24 at 2 nodes ran 2.1x slower
+  // without them, more improvements arriving only after their vertex had
+  // been expanded (step 8b).
+  const int first = CkNodeFirst(CkMyNode());
+  const bool skip = tram_proxy.ckLocalBranch()->skip_empty_deliveries;
+  for (int r = 0; r < CkNodeSize(CkMyNode()); r++) {
+    if (skip && !sizes[r])
+      continue;
     HTramNodeMessage *tmpMsg =
         (HTramNodeMessage *)CkReferenceMsg(sorted_agg_message);
     _SET_USED(UsrToEnv(tmpMsg), 0);
-    tram_proxy[i].receivePerPE(tmpMsg);
+    tram_proxy[first + r].receivePerPE(tmpMsg);
   }
   CkFreeMsg(sorted_agg_message);
 }
@@ -1444,12 +1455,23 @@ void HTramRecv::receive_small(HTramLocalMessage *agg_message) {
     sorted_agg_message->offset[i] =
         sorted_agg_message->offset[i - 1] + sizes[i];
 
-  for (int i = CkNodeFirst(CkMyNode());
-       i < CkNodeFirst(CkMyNode()) + CkNodeSize(CkMyNode()); i++) {
+  // With skip_empty_deliveries, only the PEs this message carries items for.
+  // At 8 nodes a message averages ~70 items over 15 PEs, so most deliveries
+  // are a scheduler pass and a handler for nothing, and skipping them made
+  // orkut 1.1x faster. It is off by default because those empty deliveries
+  // also sit in each PE's FIFO ahead of its heap-pass continuations, and a
+  // high-diameter solve depends on that: mesh24 at 2 nodes ran 2.1x slower
+  // without them, more improvements arriving only after their vertex had
+  // been expanded (step 8b).
+  const int first = CkNodeFirst(CkMyNode());
+  const bool skip = tram_proxy.ckLocalBranch()->skip_empty_deliveries;
+  for (int r = 0; r < CkNodeSize(CkMyNode()); r++) {
+    if (skip && !sizes[r])
+      continue;
     HTramNodeMessage *tmpMsg =
         (HTramNodeMessage *)CkReferenceMsg(sorted_agg_message);
     _SET_USED(UsrToEnv(tmpMsg), 0);
-    tram_proxy[i].receivePerPE(tmpMsg);
+    tram_proxy[first + r].receivePerPE(tmpMsg);
   }
   CkFreeMsg(sorted_agg_message);
 }
