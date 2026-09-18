@@ -442,6 +442,14 @@ class HTram : public CBase_HTram {
     // call on every idle scheduler pass, and a no-op outside WPs/WW, which
     // are the only modes with the per-destination counters that make it so.
     void flushIdle();
+    // Minimum time between two idle flushes that sent something, in seconds
+    // (0: every idle pass may flush, as before). An idle PE otherwise flushes
+    // every destination on every scheduler pass, shipping whatever one item
+    // has arrived; the drains used to be slow enough to space those passes
+    // out on their own, and made cheap (the hold bitmap) they are not.
+    double idle_flush_interval = 0.0;
+    double last_idle_flush = -1.0;
+    void setIdleFlushInterval(double seconds) { idle_flush_interval = seconds; }
     unsigned long long stale_flushes = 0; // destinations flushed by flushStale
     unsigned long long idle_flushes = 0;  // destinations flushed by flushIdle
     // Turn on source-side combining. Must be called before the first send.

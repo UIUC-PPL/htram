@@ -1167,11 +1167,21 @@ void HTram::flushIdle() {
   if (agg == WPs || agg == WW) {
     // Called on every scheduler pass while the PE is idle, so the common case
     // -- nothing buffered -- has to cost one comparison per destination.
+    double now = 0.0;
+    if (idle_flush_interval > 0.0) {
+      now = CkWallTimer();
+      if (now - last_idle_flush < idle_flush_interval)
+        return;
+    }
+    bool sent = false;
     for (int d = 0; d < destCount(); d++)
       if (updates_in_tram[d] > 0 || msgBuffers[d]->next) {
         flushDest(d);
         idle_flushes++;
+        sent = true;
       }
+    if (sent && idle_flush_interval > 0.0)
+      last_idle_flush = now;
     return;
   }
 #endif
