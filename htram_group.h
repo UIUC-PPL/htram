@@ -12,6 +12,7 @@ extern thread_local unsigned long htram_send_tsc; // htram_group.C
 #define PARTIAL_FLUSH 0.2
 #endif
 #define ALL_BUF_TYPES
+#include <climits>
 #include <queue>
 #include "htram_group.decl.h"
 #include "htram_combine.h"
@@ -311,6 +312,36 @@ class HTram : public CBase_HTram {
 #ifdef BUCKETS_BY_DEST
     int *updates_in_tram;
     array2d_of_queues tram_hold;
+    // One bit per (destination, bucket): set while tram_hold[d][b] may hold
+    // items. Every drain used to walk the buckets from 0 (or the threshold)
+    // to the top, one empty queue at a time -- up to 2048 per destination per
+    // flush, and ADD_FILLERS walks threshold..2047 on every partial flush.
+    // At 8 nodes (128 destinations) that walk was 18-38% of all cycles
+    // (step 8e, PAPI samples). With the bits a drain touches 32 words and
+    // the buckets that hold something.
+    std::vector<uint64_t> hold_bits;
+    int hold_words = 0;
+    void holdPush(int d, int b, const datatype &item) {
+      tram_hold[d][b].push(item);
+      hold_bits[(size_t)d * hold_words + (b >> 6)] |= 1UL << (b & 63);
+    }
+    void holdEmptied(int d, int b) {
+      hold_bits[(size_t)d * hold_words + (b >> 6)] &= ~(1UL << (b & 63));
+    }
+    // The first bucket at or after `from` whose bit is set, or INT_MAX.
+    int holdNext(int d, int from) const {
+      if (from >= histo_bucket_count)
+        return INT_MAX;
+      const uint64_t *w = &hold_bits[(size_t)d * hold_words];
+      int i = from >> 6;
+      uint64_t m = w[i] & (~0UL << (from & 63));
+      while (!m) {
+        if (++i >= hold_words)
+          return INT_MAX;
+        m = w[i];
+      }
+      return (i << 6) + __builtin_ctzll(m);
+    }
     // Buffers to each destination that reached bufSize and shipped on their
     // own since the last flushStale(). Zero means traffic to that destination
     // is not filling anything, so whatever is sitting in its buffer will stay

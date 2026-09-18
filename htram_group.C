@@ -103,6 +103,8 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
   }
   for (int i = 0; i < destCount(); i++)
     tram_hold[i] = new std::queue<datatype>[histo_bucket_count];
+  hold_words = (histo_bucket_count + 63) / 64;
+  hold_bits.assign((size_t)CkNumPes() * hold_words, 0);
 #else
   nodesize = 0;
   nodeOf = nullptr;
@@ -351,14 +353,23 @@ void HTram::changeThreshold(int _directThreshold, int _newtramThreshold,
     num_dest = CkNumPes();
   // With combining on, a hold's per-bucket count is exact; its lists are not,
   // because decrease-key leaves stale references behind.
-  if (_newtramThreshold > tram_threshold) {
+  if (holds) {
+    if (_newtramThreshold > tram_threshold) {
+      for (int k = 0; k < num_dest; k++)
+        for (int i = tram_threshold + 1; i <= _newtramThreshold; i++)
+          updates_in_tram[k] += holds[k].live(i);
+    } else if (tram_threshold > _newtramThreshold) {
+      for (int k = 0; k < num_dest; k++)
+        for (int i = tram_threshold; i > _newtramThreshold; i--)
+          updates_in_tram[k] -= holds[k].live(i);
+    }
+  } else if (_newtramThreshold != tram_threshold) {
+    const int lo = std::min(tram_threshold, _newtramThreshold) + 1;
+    const int hi = std::max(tram_threshold, _newtramThreshold);
+    const int sign = _newtramThreshold > tram_threshold ? 1 : -1;
     for (int k = 0; k < num_dest; k++)
-      for (int i = tram_threshold + 1; i <= _newtramThreshold; i++)
-        updates_in_tram[k] += holds ? holds[k].live(i) : tram_hold[k][i].size();
-  } else if (tram_threshold > _newtramThreshold) {
-    for (int k = 0; k < num_dest; k++)
-      for (int i = tram_threshold; i > _newtramThreshold; i--)
-        updates_in_tram[k] -= holds ? holds[k].live(i) : tram_hold[k][i].size();
+      for (int i = holdNext(k, lo); i <= hi; i = holdNext(k, i + 1))
+        updates_in_tram[k] += sign * (int)tram_hold[k][i].size();
   }
 #ifdef DEBUG
   for (int k = 0; k < CkNumNodes(); k++)
@@ -435,11 +446,11 @@ void HTram::sendItemPrioDeferredDest(datatype new_update, int neighbor_bucket,
     return;
   }
   if (neighbor_bucket > tram_threshold) {
-    tram_hold[dest_node][neighbor_bucket].push(new_update);
+    holdPush(dest_node, neighbor_bucket, new_update);
   } else {
     updates_in_tram[dest_node]++;
     if (neighbor_bucket > direct_threshold) {
-      tram_hold[dest_node][neighbor_bucket].push(new_update);
+      holdPush(dest_node, neighbor_bucket, new_update);
     } else {
       insertValueWPsTo(new_update, dest_proc, dest_node);
     }
@@ -478,7 +489,7 @@ long long HTram::admittedDrift() const {
   for (int d = 0; d < destCount(); d++) {
     long long want = msgBuffers[d] ? msgBuffers[d]->next : 0;
     if (tram_hold[d])
-      for (int i = 0; i <= tram_threshold && i < histo_bucket_count; i++)
+      for (int i = holdNext(d, 0); i <= tram_threshold; i = holdNext(d, i + 1))
         want += tram_hold[d][i].size();
     drift += std::llabs(want - (long long)updates_in_tram[d]);
   }
@@ -508,7 +519,7 @@ void HTram::pendingItems(long long *held, long long *admitted,
       for (int i = 0; i < histo_bucket_count; i++)
         h += holds[d].live(i);
     } else if (tram_hold[d]) {
-      for (int i = 0; i < histo_bucket_count; i++)
+      for (int i = holdNext(d, 0); i < histo_bucket_count; i = holdNext(d, i + 1))
         h += tram_hold[d][i].size();
     }
   }
@@ -539,15 +550,20 @@ void HTram::coarsenBuckets(int k, bool keep_top) {
   for (int d = 0; d < destCount(); d++) {
     if (!tram_hold[d])
       continue;
-    for (int i = tram_threshold + 1; i < admit_below; i++)
+    for (int i = holdNext(d, tram_threshold + 1); i < admit_below;
+         i = holdNext(d, i + 1))
       updates_in_tram[d] += tram_hold[d][i].size();
-    for (int i = 1; i < merged_top; i++) {
+    // Ascending, so i / k <= i has already been visited: a bucket is either
+    // a source or a destination by the time it is reached, never moved twice.
+    for (int i = holdNext(d, 1); i < merged_top; i = holdNext(d, i + 1)) {
+      if (i / k == i)
+        continue;
       std::queue<datatype> &src = tram_hold[d][i];
-      std::queue<datatype> &dst = tram_hold[d][i / k];
       while (!src.empty()) {
-        dst.push(src.front());
+        holdPush(d, i / k, src.front());
         src.pop();
       }
+      holdEmptied(d, i);
     }
   }
 #else
@@ -580,10 +596,13 @@ void HTram::coarsenBuckets(int k, bool keep_top) {
 #ifdef BUCKETS_BY_DEST
 void HTram::insertBucketsByDest(int high, int dest_node) {
   HTramMessage *destMsg = msgBuffers[dest_node];
-  for (int i = 0; i <= high; i++) {
+  for (int i = holdNext(dest_node, 0); i <= high;
+       i = holdNext(dest_node, i + 1)) {
     while (!tram_hold[dest_node][i].empty()) {
       datatype item = tram_hold[dest_node][i].front();
       tram_hold[dest_node][i].pop();
+      if (tram_hold[dest_node][i].empty())
+        holdEmptied(dest_node, i);
       setItem(destMsg->items()[destMsg->next], item, destForItem(item));
       destMsg->next++;
       if (destMsg->next == bufSize) {
@@ -931,7 +950,9 @@ void HTram::tflush(bool idleflush) {
     if (tram_hold)
       for (int dest_node = 0; dest_node < num_dest; dest_node++) {
         HTramMessage *destMsg = msgBuffers[dest_node];
-        for (int i = 0; i <= tram_threshold; i++) {
+        for (int i = holdNext(dest_node, 0); i <= tram_threshold;
+             i = holdNext(dest_node, i + 1)) {
+          holdEmptied(dest_node, i); // drained below
           while (!tram_hold[dest_node][i].empty()) {
             datatype item = tram_hold[dest_node][i].front();
             tram_hold[dest_node][i].pop();
@@ -960,10 +981,13 @@ void HTram::tflush(bool idleflush) {
         updates_in_tram[node] -= destMsg->next;
 #ifdef ADD_FILLERS
         if (destMsg->next < bufSize / 2) {
-          for (int i = tram_threshold + 1; i < histo_bucket_count; i++) {
+          for (int i = holdNext(node, tram_threshold + 1); i < histo_bucket_count;
+               i = holdNext(node, i + 1)) {
             while (!tram_hold[node][i].empty()) {
               datatype item = tram_hold[node][i].front();
               tram_hold[node][i].pop();
+              if (tram_hold[node][i].empty())
+                holdEmptied(node, i);
               setItem(destMsg->items()[destMsg->next], item, destForItem(item));
               destMsg->next++;
               if (destMsg->next >= bufSize / 2)
@@ -1070,7 +1094,8 @@ void HTram::flushDest(int dest) {
     return;
   }
   HTramMessage *destMsg = msgBuffers[dest];
-  for (int i = 0; i <= tram_threshold; i++) {
+  for (int i = holdNext(dest, 0); i <= tram_threshold; i = holdNext(dest, i + 1)) {
+    holdEmptied(dest, i); // drained below
     while (!tram_hold[dest][i].empty()) {
       datatype item = tram_hold[dest][i].front();
       tram_hold[dest][i].pop();
@@ -1095,11 +1120,14 @@ void HTram::flushDest(int dest) {
     // Same padding tflush() applies, so the two flushes differ only in which
     // destinations they reach. Fillers sit above the threshold and were never
     // counted in updates_in_tram, hence the decrement above comes first.
-    for (int i = tram_threshold + 1;
-         i < histo_bucket_count && destMsg->next < bufSize / 2; i++) {
+    for (int i = holdNext(dest, tram_threshold + 1);
+         i < histo_bucket_count && destMsg->next < bufSize / 2;
+         i = holdNext(dest, i + 1)) {
       while (!tram_hold[dest][i].empty() && destMsg->next < bufSize / 2) {
         datatype item = tram_hold[dest][i].front();
         tram_hold[dest][i].pop();
+        if (tram_hold[dest][i].empty())
+          holdEmptied(dest, i);
         setItem(destMsg->items()[destMsg->next], item, destForItem(item));
         destMsg->next++;
       }
