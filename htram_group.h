@@ -13,7 +13,39 @@ extern thread_local unsigned long htram_send_tsc; // htram_group.C
 #endif
 #define ALL_BUF_TYPES
 #include <climits>
+#include <cstddef>
 #include <queue>
+#include <vector>
+
+// FIFO for the per-(destination, bucket) holds. std::queue is a deque, which
+// in libstdc++ allocates a map and a 512-byte chunk even when empty (64
+// destinations x 2048 buckets per PE) and a new chunk every 32 pushes; the
+// holds were 6% of rmat26's samples at 16 Frontier nodes, allocation 3%
+// (job 5538734). A drained queue keeps a small buffer; an empty one is 32
+// bytes. A partly drained queue drops its consumed prefix once it dominates.
+template <class T> class HoldQueue {
+  std::vector<T> items_;
+  std::size_t head_ = 0;
+  static const std::size_t kKeep = 256;  // capacity kept across drains, in items
+public:
+  void push(const T &x) { items_.push_back(x); }
+  T &front() { return items_[head_]; }
+  const T &front() const { return items_[head_]; }
+  void pop() {
+    if (++head_ == items_.size()) {
+      head_ = 0;
+      if (items_.capacity() > kKeep)
+        std::vector<T>().swap(items_);
+      else
+        items_.clear();
+    } else if (head_ >= 4096 && 2 * head_ >= items_.size()) {
+      items_.erase(items_.begin(), items_.begin() + head_);
+      head_ = 0;
+    }
+  }
+  bool empty() const { return head_ == items_.size(); }
+  std::size_t size() const { return items_.size() - head_; }
+};
 #include "htram_group.decl.h"
 #include "htram_combine.h"
 
@@ -47,7 +79,9 @@ typedef findBossData datatype;
 // accidentally picked up instead.
 #include HTRAM_GRAPH_TYPES_HEADER
 typedef Update datatype;
-typedef std::queue<datatype>** array2d_of_queues;
+typedef HoldQueue<datatype> hold_queue;
+typedef hold_queue** array2d_of_queues;
+#define HTRAM_HOLD_QUEUE_DEFINED
 #endif
 
 #include <memory>
@@ -109,6 +143,9 @@ struct item {
   T payload;
 };
 
+#ifndef HTRAM_HOLD_QUEUE_DEFINED
+typedef HoldQueue<datatype> hold_queue;
+#endif
 typedef item<datatype> itemT;
 #define HTRAM_ITEMS_CARRY_DEST 1
 inline void setItem(itemT &it, const datatype &value, int dest_pe) {
@@ -366,7 +403,7 @@ class HTram : public CBase_HTram {
     }
 #else
     int updates_in_tram_count = 0;
-    std::queue<datatype> *tram_hold;
+    hold_queue *tram_hold;
 #endif
     void *objPtr;
     HTramNodeGrp *srcNodeGrp;

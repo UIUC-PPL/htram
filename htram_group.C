@@ -93,7 +93,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
   // destinations actually in use get rows. Under WPs a row is per node, so
   // filling CkNumPes() of them allocated CkNodeSize() times too many:
   // histo_bucket_count queues each, on every PE.
-  tram_hold = new std::queue<datatype> *[CkNumPes()];
+  tram_hold = new hold_queue *[CkNumPes()];
   updates_in_tram = new int[CkNumPes()];
   full_sends = new int[CkNumPes()];
   for (int i = 0; i < CkNumPes(); i++) {
@@ -102,7 +102,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
     full_sends[i] = 0;
   }
   for (int i = 0; i < destCount(); i++)
-    tram_hold[i] = new std::queue<datatype>[histo_bucket_count];
+    tram_hold[i] = new hold_queue[histo_bucket_count];
   hold_words = (histo_bucket_count + 63) / 64;
   hold_bits.assign((size_t)CkNumPes() * hold_words, 0);
 #else
@@ -261,7 +261,7 @@ void HTram::reset_stats(int btype, int buf_size, int agtype) {
   for (int i = 0; i < destCount(); i++) {
 #ifdef BUCKETS_BY_DEST
     if (tram_hold && !tram_hold[i])
-      tram_hold[i] = new std::queue<datatype>[histo_bucket_count];
+      tram_hold[i] = new hold_queue[histo_bucket_count];
 #endif
     msgBuffers[i] = newHTramMessage(bufSize);
   }
@@ -558,7 +558,7 @@ void HTram::coarsenBuckets(int k, bool keep_top) {
     for (int i = holdNext(d, 1); i < merged_top; i = holdNext(d, i + 1)) {
       if (i / k == i)
         continue;
-      std::queue<datatype> &src = tram_hold[d][i];
+      hold_queue &src = tram_hold[d][i];
       while (!src.empty()) {
         holdPush(d, i / k, src.front());
         src.pop();
@@ -570,8 +570,8 @@ void HTram::coarsenBuckets(int k, bool keep_top) {
   for (int i = tram_threshold + 1; i < admit_below; i++)
     updates_in_tram_count += tram_hold[i].size();
   for (int i = 1; i < merged_top; i++) {
-    std::queue<datatype> &src = tram_hold[i];
-    std::queue<datatype> &dst = tram_hold[i / k];
+    hold_queue &src = tram_hold[i];
+    hold_queue &dst = tram_hold[i / k];
     while (!src.empty()) {
       dst.push(src.front());
       src.pop();
