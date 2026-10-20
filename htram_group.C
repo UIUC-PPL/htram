@@ -134,6 +134,7 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
     msgBuffers[i] = nullptr;
   for (int i = 0; i < destCount(); i++)
     msgBuffers[i] = newHTramMessage(bufSize);
+  min_key_.assign(CkNumPes(), LLONG_MAX);
 
   localBuffers = new std::vector<itemT>[CkNumPes()];
 
@@ -617,7 +618,7 @@ void HTram::insertBucketsByDest(int high, int dest_node) {
           HTRAM_TIMED_SEND(thisProxy[dest_node].receiveOnPE(destMsg);)
         else
           HTRAM_TIMED_SEND(nodeGrpProxy[dest_node].receive(destMsg);)
-        msgBuffers[dest_node] = newHTramMessage(bufSize);
+        renewBuffer(dest_node);
         destMsg = msgBuffers[dest_node];
       }
       if (updates_in_tram[dest_node] < release_level)
@@ -646,7 +647,7 @@ void HTram::insertBuckets(int high) {
         updates_in_tram_count -= destMsg->next;
         trim(destMsg);
         HTRAM_TIMED_SEND(nodeGrpProxy[dest_node].receive(destMsg);)
-        msgBuffers[dest_node] = newHTramMessage(bufSize);
+        renewBuffer(dest_node);
       }
       if (updates_in_tram_count < selectivity * bufSize * num_nodes)
         break;
@@ -685,7 +686,7 @@ void HTram::insertValueWPsTo(datatype value, int dest_pe, int destNode) {
       HTRAM_TIMED_SEND(thisProxy[destNode].receiveOnPE(destMsg);)
     else
       HTRAM_TIMED_SEND(nodeGrpProxy[destNode].receive(destMsg);)
-    msgBuffers[destNode] = newHTramMessage(bufSize);
+    renewBuffer(destNode);
   }
 }
 
@@ -698,7 +699,7 @@ void HTram::insertToProcess(datatype value, int destNode) {
   if (destMsg->next == bufSize) {
     trim(destMsg);
     HTRAM_TIMED_SEND(nodeGrpProxy[destNode].receiveOnProc(destMsg);)
-    msgBuffers[destNode] = newHTramMessage(bufSize);
+    renewBuffer(destNode);
   }
 }
 
@@ -741,7 +742,7 @@ void HTram::insertValue(datatype value, int dest_pe) {
 #endif
         trim(destMsg);
         HTRAM_TIMED_SEND(thisProxy[dest_pe].receiveOnPE(destMsg);)
-        msgBuffers[dest_pe] = newHTramMessage(bufSize);
+        renewBuffer(dest_pe);
       } else if (agg == WsP) {
         shipWsP(destNode);
       } else {
@@ -754,7 +755,7 @@ void HTram::insertValue(datatype value, int dest_pe) {
 #endif
         trim(destMsg);
         HTRAM_TIMED_SEND(nodeGrpProxy[destNode].receive(destMsg);)
-        msgBuffers[destNode] = newHTramMessage(bufSize);
+        renewBuffer(destNode);
       }
     }
   }
@@ -804,6 +805,14 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
     srcNodeGrp->msgBuffers[destnode]->items()[idx + i] =
         local_buf[destnode]->items()[i];
   }
+  // The shared buffer's minimum key covers these items before they count as
+  // done, so no ship of this buffer can reset it in between.
+  long long k = min_key_[destnode];
+  std::atomic<long long> &shared_min = srcNodeGrp->min_key[destnode];
+  long long cur = shared_min.load(std::memory_order_relaxed);
+  while (k < cur &&
+         !shared_min.compare_exchange_weak(cur, k, std::memory_order_relaxed))
+    ;
   int done_count = srcNodeGrp->done_count[destnode].fetch_add(
       increment, std::memory_order_acq_rel);
 
@@ -832,10 +841,12 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
     trim(srcNodeGrp->msgBuffers[destnode]);
     HTRAM_TIMED_SEND(nodeGrpProxy[destnode].receive(srcNodeGrp->msgBuffers[destnode]);)
     srcNodeGrp->msgBuffers[destnode] = newHTramMessage(BUFSIZE + LOCAL_BUFSIZE);
+    srcNodeGrp->min_key[destnode].store(LLONG_MAX, std::memory_order_relaxed);
     srcNodeGrp->done_count[destnode] = 0;
     srcNodeGrp->get_idx[destnode] = 0;
   }
   local_idx[destnode] = 0;
+  min_key_[destnode] = LLONG_MAX;
 }
 
 void HTram::enableIdleFlush() {
@@ -891,14 +902,14 @@ void HTram::tflush(bool idleflush) {
 #endif
           trim(destMsg);
           HTRAM_TIMED_SEND(nodeGrpProxy[i].receive(destMsg);)
-          msgBuffers[i] = newHTramMessage(bufSize);
+          renewBuffer(i);
         } else if (agg == WW) {
 #ifdef BUCKETS_BY_DEST
           updates_in_tram[i] -= destMsg->next;
 #endif
           trim(destMsg);
           HTRAM_TIMED_SEND(thisProxy[i].receiveOnPE(destMsg);)
-          msgBuffers[i] = newHTramMessage(bufSize);
+          renewBuffer(i);
         }
       }
     }
@@ -929,7 +940,7 @@ void HTram::tflush(bool idleflush) {
                 HTRAM_TIMED_SEND(thisProxy[dest_node].receiveOnPE(destMsg);)
               else
                 HTRAM_TIMED_SEND(nodeGrpProxy[dest_node].receive(destMsg);)
-              msgBuffers[dest_node] = newHTramMessage(bufSize);
+              renewBuffer(dest_node);
               destMsg = msgBuffers[dest_node];
             }
           }
@@ -967,7 +978,7 @@ void HTram::tflush(bool idleflush) {
           HTRAM_TIMED_SEND(thisProxy[node].receiveOnPE(destMsg);)
         else
           HTRAM_TIMED_SEND(nodeGrpProxy[node].receive(destMsg);)
-        msgBuffers[node] = newHTramMessage(bufSize);
+        renewBuffer(node);
       }
   }
   // Optional: the 2-argument registration never sets this, and the GRAPH
@@ -1008,7 +1019,7 @@ void HTram::shipBuffer(int dest, bool full) {
     HTRAM_TIMED_SEND(thisProxy[dest].receiveOnPE(m);)
   else
     HTRAM_TIMED_SEND(nodeGrpProxy[dest].receive(m);)
-  msgBuffers[dest] = newHTramMessage(bufSize);
+  renewBuffer(dest);
 }
 
 // Combining on: while a full buffer's worth of admitted items is held for
@@ -1072,7 +1083,7 @@ void HTram::flushDest(int dest) {
           HTRAM_TIMED_SEND(thisProxy[dest].receiveOnPE(destMsg);)
         else
           HTRAM_TIMED_SEND(nodeGrpProxy[dest].receive(destMsg);)
-        msgBuffers[dest] = newHTramMessage(bufSize);
+        renewBuffer(dest);
         destMsg = msgBuffers[dest];
       }
     }
@@ -1102,7 +1113,7 @@ void HTram::flushDest(int dest) {
       HTRAM_TIMED_SEND(thisProxy[dest].receiveOnPE(destMsg);)
     else
       HTRAM_TIMED_SEND(nodeGrpProxy[dest].receive(destMsg);)
-    msgBuffers[dest] = newHTramMessage(bufSize);
+    renewBuffer(dest);
   }
 }
 #endif
@@ -1183,7 +1194,7 @@ void HTram::shipWsP(int node) {
   CkAssert(sz == destMsg->next);
   trim(destMsg);
   HTRAM_TIMED_SEND(nodeGrpProxy[node].receive_no_sort(destMsg);)
-  msgBuffers[node] = newHTramMessage(bufSize);
+  renewBuffer(node);
 }
 
 bool HTram::shipLocalPP(int node) {
@@ -1200,6 +1211,7 @@ bool HTram::shipLocalPP(int node) {
   HTRAM_TIMED_SEND(nodeGrpProxy[node].receive_small(m);)
   local_buf[node] = newHTramLocalMessage(LOCAL_BUFSIZE);
   local_idx[node] = 0;
+  min_key_[node] = LLONG_MAX;
   return true;
 }
 
@@ -1250,6 +1262,7 @@ bool HTram::shipSharedPP(int i) {
   trim(srcNodeGrp->msgBuffers[i]);
   HTRAM_TIMED_SEND(nodeGrpProxy[i].receive(srcNodeGrp->msgBuffers[i]);)
   srcNodeGrp->msgBuffers[i] = newHTramMessage(BUFSIZE + LOCAL_BUFSIZE);
+  srcNodeGrp->min_key[i].store(LLONG_MAX, std::memory_order_relaxed);
   srcNodeGrp->done_count[i] = 0;
   srcNodeGrp->flush_count = 0;
   srcNodeGrp->get_idx[i] = 0;
@@ -1277,28 +1290,48 @@ void HTram::insert(const datatype &item, int dest_pe) {
 }
 
 void HTram::flushTo(int dest_pe) {
-  const int node = dest_pe / CkNodeSize(0);
+  flushIndex(agg == WW ? dest_pe : dest_pe / CkNodeSize(0));
+}
+
+void HTram::flushIndex(int dest) {
   switch (agg) {
 #ifdef BUCKETS_BY_DEST
   case WPs:
-    flushDest(node);
-    break;
   case WW:
-    flushDest(dest_pe);
+    flushDest(dest);
     break;
 #endif
   case WsP:
-    if (msgBuffers[node]->next) {
+    if (msgBuffers[dest]->next) {
       flush_msg_count++;
-      shipWsP(node);
+      shipWsP(dest);
     }
     break;
   case PP:
-    shipLocalPP(node);
+    shipLocalPP(dest);
     break;
   default:
     CkAbort("htram: flushTo() under WPs/WW needs a BUCKETS_BY_DEST build");
   }
+}
+
+void HTram::insert(const datatype &item, int dest_pe, long long key) {
+  // Before the insert: if it fills and ships the buffer, the reset that
+  // follows covers this item too.
+  const int d = (agg == WW) ? dest_pe : dest_pe / CkNodeSize(0);
+  if (key < min_key_[d])
+    min_key_[d] = key;
+  insert(item, dest_pe);
+}
+
+void HTram::flushDue(long long horizon) {
+  for (int d = 0; d < destCount(); d++)
+    if (min_key_[d] <= horizon)
+      flushIndex(d);
+  if (agg == PP)
+    for (int i = 0; i < CkNumNodes(); i++)
+      if (srcNodeGrp->min_key[i].load(std::memory_order_relaxed) <= horizon)
+        shipSharedPP(i);
 }
 
 void HTram::flushPending() {
@@ -1352,7 +1385,7 @@ void HTram::setAggregationMode(int mode) {
     if (tram_hold && !tram_hold[i])
       tram_hold[i] = new hold_queue[histo_bucket_count];
 #endif
-    msgBuffers[i] = newHTramMessage(bufSize);
+    renewBuffer(i);
   }
 }
 
@@ -1415,7 +1448,9 @@ HTramNodeGrp::HTramNodeGrp() {
   msgBuffers = new HTramMessage *[CkNumNodes()];
   get_idx.reset(new std::atomic<int>[CkNumNodes()]);
   done_count.reset(new std::atomic<int>[CkNumNodes()]);
+  min_key.reset(new std::atomic<long long>[CkNumNodes()]);
   for (int i = 0; i < CkNumNodes(); i++) {
+    min_key[i] = LLONG_MAX;
     // Written concurrently by every PE on the node, any of which may have a
     // different bufSize, so these are allocated at the maximum. The extra
     // LOCAL_BUFSIZE is slack for copyToNodeBuf, which claims a slot index

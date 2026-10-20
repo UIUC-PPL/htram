@@ -327,6 +327,9 @@ class HTramNodeGrp : public CBase_HTramNodeGrp {
     // within the range of node counts this code is meant to scale to.
     std::unique_ptr<std::atomic<int>[]> get_idx;
     std::unique_ptr<std::atomic<int>[]> done_count;
+    // Smallest key (insert(item, pe, key)) among the items in each shared
+    // buffer, LLONG_MAX when none; reset when the buffer ships.
+    std::unique_ptr<std::atomic<long long>[]> min_key;
     HTramMessage **msgBuffers;
 #ifndef BUCKETS_BY_DEST
     int num_mailboxes = 0;
@@ -456,6 +459,18 @@ class HTram : public CBase_HTram {
 
     // The destination PE an item carries on the wire, or nothing when the
     // layout does not carry one (the lookup is then compiled away).
+    // Smallest key among the items this PE has given insert(item, pe, key)
+    // that are still in its own buffer toward each destination (a node, or a
+    // PE under WW; under PP the local buffer only); LLONG_MAX when none. It
+    // is reset only where a shipped buffer is replaced, so it can be low --
+    // an extra flush -- but never high.
+    std::vector<long long> min_key_;
+    void renewBuffer(int d) {
+      msgBuffers[d] = newHTramMessage(bufSize);
+      min_key_[d] = LLONG_MAX;
+    }
+    // Ship this PE's buffer toward destination index d (node, or PE under WW)
+    void flushIndex(int d);
     // WsP: pack the per-PE vectors for one node into its buffer and send it.
     void shipWsP(int node);
     // PP: send this PE's local buffer for one node, and (separately) the
@@ -533,6 +548,14 @@ class HTram : public CBase_HTram {
       insert(item, dest_pe);
       flushTo(dest_pe);
     }
+    // Keyed insert: as insert(), and the item's key (e.g. a timestamp) counts
+    // toward its destination's minimum, so flushDue() can ship by key.
+    void insert(const datatype &item, int dest_pe, long long key);
+    // Ship every destination whose buffered minimum key is <= horizon (and,
+    // under PP, every shared node buffer whose minimum is). Items inserted
+    // without a key never make a destination due.
+    void flushDue(long long horizon);
+    long long minKey(int dest) const { return min_key_[dest]; }
     // Ship every destination this PE has anything buffered for, in any mode.
     // Unlike tflush(), sends nothing for a destination with nothing buffered.
     void flushPending();
