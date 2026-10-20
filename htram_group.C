@@ -777,11 +777,24 @@ std::mutex node_mutex;
 // but ARM does not: a shipper could send items not yet written, and a PE
 // could copy into the buffer that had just been sent.
 void HTram::copyToNodeBuf(int destnode, int increment) {
-  int idx = srcNodeGrp->get_idx[destnode].fetch_add(increment,
-                                                    std::memory_order_acquire);
-  while (idx >= bufSize) {
-    idx = srcNodeGrp->get_idx[destnode].fetch_add(increment,
-                                                  std::memory_order_acquire);
+  // Reserve with a compare-and-swap, waiting on plain loads while the buffer
+  // is full and being shipped. This used to retry fetch_add(increment) until
+  // it returned a free slot, so every waiting PE kept advancing get_idx; a
+  // ship that stalled in the network (sends retry under backpressure) let
+  // the waiters wrap it past INT_MAX to a negative index that passed the
+  // idx >= bufSize test, and the copy below wrote ~2^31 items before the
+  // buffer (segfault, PP with 16-item buffers on 4 Stampede3 nodes).
+  std::atomic<int> &get_idx = srcNodeGrp->get_idx[destnode];
+  int idx = get_idx.load(std::memory_order_acquire);
+  for (;;) {
+    if (idx >= bufSize) {
+      idx = get_idx.load(std::memory_order_acquire);
+      continue;
+    }
+    if (get_idx.compare_exchange_weak(idx, idx + increment,
+                                      std::memory_order_acquire,
+                                      std::memory_order_acquire))
+      break;
   }
   int i;
   for (i = 0; i < increment; i++) {
