@@ -50,7 +50,8 @@ public:
 #include "htram_combine.h"
 
 // Application-specific data type selection.
-// Pass one of -DHISTO, -DPHOLD, -DIG, -DUNION_FIND, or -DGRAPH at compile time.
+// Pass one of -DHISTO, -DPHOLD, -DPDES, -DIG, -DUNION_FIND, or -DGRAPH at
+// compile time.
 #ifdef SSSP
 typedef std::pair<int,int> datatype;
 #endif
@@ -61,6 +62,29 @@ typedef int datatype;
 
 #ifdef PHOLD
 typedef double datatype;
+#endif
+
+#ifdef PDES
+// One optimistic-PDES event (Charades RemoteEvent): its header and a fixed
+// payload slot. Fixed rather than variable size so that the item type stays a
+// compile-time constant like every other flavour; a client whose payload does
+// not fit sends that event outside htram. 64 bytes with the default slot.
+#include <cstdint>
+#ifndef PDES_PAYLOAD_BYTES
+#define PDES_PAYLOAD_BYTES 16
+#endif
+struct PdesItem {
+  uint64_t ts;
+  uint64_t event_id;
+  uint64_t src_lp;
+  uint64_t dest_lp;
+  uint32_t phase;   // bucketed GVT: the event's bucket
+  uint32_t offset;  // buckets ahead of GVT when sent
+  uint8_t type_id;
+  uint8_t type_size;
+  char payload[PDES_PAYLOAD_BYTES];
+};
+typedef PdesItem datatype;
 #endif
 
 #ifdef IG
@@ -145,6 +169,7 @@ struct item {
 
 #ifndef HTRAM_HOLD_QUEUE_DEFINED
 typedef HoldQueue<datatype> hold_queue;
+typedef hold_queue** array2d_of_queues;
 #endif
 typedef item<datatype> itemT;
 #define HTRAM_ITEMS_CARRY_DEST 1
@@ -424,6 +449,12 @@ class HTram : public CBase_HTram {
 
     // The destination PE an item carries on the wire, or nothing when the
     // layout does not carry one (the lookup is then compiled away).
+    // WsP: pack the per-PE vectors for one node into its buffer and send it.
+    void shipWsP(int node);
+    // PP: send this PE's local buffer for one node, and (separately) the
+    // node's shared buffer. Return whether anything was sent.
+    bool shipLocalPP(int node);
+    bool shipSharedPP(int node);
     int destForItem(const datatype &value) {
       return HTRAM_ITEMS_CARRY_DEST ? get_dest_proc(objPtr, value) : -1;
     }
@@ -479,6 +510,30 @@ class HTram : public CBase_HTram {
     // call on every idle scheduler pass, and a no-op outside WPs/WW, which
     // are the only modes with the per-destination counters that make it so.
     void flushIdle();
+    // Mode-independent per-item interface, for a client that switches
+    // aggregation modes at run time (setAggregationMode) and wants one send
+    // and flush policy to mean the same thing in each. insert() places the
+    // item in this PE's buffer toward dest_pe -- the buffer for dest_pe's
+    // node, or for dest_pe itself under WW -- keeping the admitted counters
+    // that flushIdle/flushStale read consistent under WPs and WW.
+    void insert(const datatype &item, int dest_pe);
+    // Ship what this PE has buffered toward dest_pe's destination now. Under
+    // PP that is this PE's local buffer for the node; items already copied
+    // into the node's shared buffer leave when it fills or on flushPending().
+    void flushTo(int dest_pe);
+    // insert() then flushTo(): for an item that must not wait.
+    void insertUrgent(const datatype &item, int dest_pe) {
+      insert(item, dest_pe);
+      flushTo(dest_pe);
+    }
+    // Ship every destination this PE has anything buffered for, in any mode.
+    // Unlike tflush(), sends nothing for a destination with nothing buffered.
+    void flushPending();
+    // Select WPs, WsP, PP or WW. Only before the first item is sent; under
+    // PP the buffer size must be a multiple of LOCAL_BUFSIZE, since the shared
+    // node buffer ships when exactly bufSize items have been copied into it.
+    void setAggregationMode(int mode);
+    int aggregationMode() const { return agg; }
     // Minimum time between two idle flushes that sent something, in seconds
     // (0: every idle pass may flush, as before). An idle PE otherwise flushes
     // every destination on every scheduler pass, shipping whatever one item

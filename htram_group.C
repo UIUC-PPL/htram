@@ -196,6 +196,9 @@ void HTram::tramStats(CkCallback cb) {
 
 void HTram::setBufferSize(int new_size) {
   CkAssert(new_size > 0 && new_size <= BUFSIZE);
+  if (agg == PP && new_size % LOCAL_BUFSIZE)
+    CkAbort("htram: PP needs a buffer size that is a multiple of %d, not %d",
+            LOCAL_BUFSIZE, new_size);
   if (new_size == bufSize)
     return;
 #ifdef BUCKETS_BY_DEST
@@ -731,16 +734,6 @@ void HTram::insertValue(datatype value, int dest_pe) {
     destMsg->next++;
     if (destMsg->next == bufSize) {
       agg_msg_count++;
-      if (agg == WsP) {
-        int sz = 0;
-        for (int i = 0; i < CkNodeSize(0); i++) {
-          std::vector<itemT> localMsg =
-              localBuffers[destNode * CkNodeSize(0) + i];
-          std::copy(localMsg.begin(), localMsg.end(), &(destMsg->items()[sz]));
-          sz += localMsg.size();
-          localBuffers[destNode * CkNodeSize(0) + i].clear();
-        }
-      }
       if (agg == WW) {
 #ifdef BUCKETS_BY_DEST
         updates_in_tram[dest_pe] -= destMsg->next;
@@ -750,9 +743,7 @@ void HTram::insertValue(datatype value, int dest_pe) {
         HTRAM_TIMED_SEND(thisProxy[dest_pe].receiveOnPE(destMsg);)
         msgBuffers[dest_pe] = newHTramMessage(bufSize);
       } else if (agg == WsP) {
-        trim(destMsg);
-        HTRAM_TIMED_SEND(nodeGrpProxy[destNode].receive_no_sort(destMsg);)
-        msgBuffers[destNode] = newHTramMessage(bufSize);
+        shipWsP(destNode);
       } else {
         tot_send_count += destMsg->next;
 #ifdef BUCKETS_BY_DEST
@@ -842,56 +833,13 @@ void HTram::tflush(bool idleflush) {
   }
 #endif
   if (agg == PP) {
-    int flush_count =
-        srcNodeGrp->flush_count.fetch_add(1, std::memory_order_seq_cst);
-    for (int i = 0; i < CkNumNodes(); i++) {
-      local_buf[i]->next = local_idx[i];
-      ((envelope *)UsrToEnv(local_buf[i]))
-          ->setUsersize(local_buf[i]->usedBytes());
-      HTRAM_TIMED_SEND(nodeGrpProxy[i].receive_small(local_buf[i]);)
-      local_buf[i] = newHTramLocalMessage(LOCAL_BUFSIZE);
-      local_idx[i] = 0;
-    }
-    {
-      for (int i = 0; i < CkNumNodes(); i++) {
-        if (srcNodeGrp->done_count[i]) {
-          flush_msg_count++;
-          int idx = srcNodeGrp->get_idx[i].fetch_add(bufSize,
-                                                     std::memory_order_relaxed);
-          int done_count =
-              srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_relaxed);
-          if (idx >= bufSize)
-            continue;
-          while (idx != done_count) {
-            done_count = srcNodeGrp->done_count[i].fetch_add(
-                0, std::memory_order_relaxed);
-          }
-#ifndef BUCKETS_BY_DEST
-          if (done_count == idx) {
-            int count = 0;
-            while (count < done_count) {
-              count = 0;
-              for (int j = 0; j < CkNodeSize(CkMyNode()); ++j) {
-                count += srcNodeGrp->mailbox_receiver[j + (i * CkNodeSize(CkMyNode()))].load(
-                    std::memory_order_relaxed);
-                std::atomic_thread_fence(std::memory_order_acquire);
-              }
-            }
-            for (int j = 0; j < CkNodeSize(CkMyNode()); ++j)
-              srcNodeGrp->mailbox_receiver[j + (i * CkNodeSize(CkMyNode()))].store(
-                  0, std::memory_order_relaxed);
-          }
-#endif
-          srcNodeGrp->msgBuffers[i]->next = srcNodeGrp->done_count[i];
-          trim(srcNodeGrp->msgBuffers[i]);
-          HTRAM_TIMED_SEND(nodeGrpProxy[i].receive(srcNodeGrp->msgBuffers[i]);)
-          srcNodeGrp->msgBuffers[i] = newHTramMessage(BUFSIZE + LOCAL_BUFSIZE);
-          srcNodeGrp->done_count[i] = 0;
-          srcNodeGrp->flush_count = 0;
-          srcNodeGrp->get_idx[i] = 0;
-        }
-      }
-    }
+    srcNodeGrp->flush_count.fetch_add(1, std::memory_order_seq_cst);
+    // Local buffers that hold nothing are no longer sent: each was a message
+    // per node per flush carrying zero items.
+    for (int i = 0; i < CkNumNodes(); i++)
+      shipLocalPP(i);
+    for (int i = 0; i < CkNumNodes(); i++)
+      shipSharedPP(i);
   } else {
     int buf_count = CkNumNodes();
     if (agg == WW)
@@ -907,18 +855,7 @@ void HTram::tflush(bool idleflush) {
         flush_msg_count++;
         HTramMessage *destMsg = msgBuffers[i];
         if (agg == WsP) {
-          int destNode = i;
-          int sz = 0;
-          for (int k = 0; k < CkNodeSize(0); k++) {
-            std::vector<itemT> localMsg =
-                localBuffers[destNode * CkNodeSize(0) + k];
-            std::copy(localMsg.begin(), localMsg.end(), &(destMsg->items()[sz]));
-            sz += localMsg.size();
-            localBuffers[destNode * CkNodeSize(0) + k].clear();
-          }
-          trim(destMsg);
-          HTRAM_TIMED_SEND(nodeGrpProxy[i].receive_no_sort(destMsg);)
-          msgBuffers[i] = newHTramMessage(bufSize);
+          shipWsP(i);
         } else if (agg == WPs) {
 #ifdef BUCKETS_BY_DEST
           // These items are leaving; they are no longer held for this
@@ -1157,8 +1094,12 @@ void HTram::flushStale() {
     return;
   }
 #endif
-  // No per-destination bookkeeping in the other modes, so the best available
-  // answer is the whole-library flush.
+  // WsP and PP keep no per-destination fill counts, so "stale" is everything
+  // still buffered -- without tflush()'s empty messages.
+  if (agg == WsP || agg == PP) {
+    flushPending();
+    return;
+  }
   tflush();
 }
 
@@ -1185,11 +1126,197 @@ void HTram::flushIdle() {
     return;
   }
 #endif
-  // Nothing here. The other modes keep no per-destination bookkeeping, so the
-  // only flush available is the whole-library one -- and this is called on
-  // every idle scheduler pass, so an unconditional flush would be a busy loop
-  // shipping empty messages rather than a cadence. flushStale() can fall back
-  // that way because it runs once per round; this cannot.
+  // WsP and PP keep no per-destination bookkeeping, but flushPending() sends
+  // only what is buffered (tflush() would ship an empty message per node on
+  // every idle pass), so it can run here; the interval paces it the same way.
+  if (agg == WsP || agg == PP) {
+    double now = 0.0;
+    if (idle_flush_interval > 0.0) {
+      now = CkWallTimer();
+      if (now - last_idle_flush < idle_flush_interval)
+        return;
+    }
+    // Counted per call, not per destination, in these modes.
+    idle_flushes++;
+    flushPending();
+    if (idle_flush_interval > 0.0)
+      last_idle_flush = now;
+  }
+}
+
+void HTram::shipWsP(int node) {
+  HTramMessage *destMsg = msgBuffers[node];
+  const int nsize = CkNodeSize(0);
+  int sz = 0;
+  for (int k = 0; k < nsize; k++) {
+    std::vector<itemT> &v = localBuffers[node * nsize + k];
+    std::copy(v.begin(), v.end(), &(destMsg->items()[sz]));
+    sz += v.size();
+    v.clear();
+  }
+  CkAssert(sz == destMsg->next);
+  trim(destMsg);
+  HTRAM_TIMED_SEND(nodeGrpProxy[node].receive_no_sort(destMsg);)
+  msgBuffers[node] = newHTramMessage(bufSize);
+}
+
+bool HTram::shipLocalPP(int node) {
+  if (!local_idx[node])
+    return false;
+  HTramLocalMessage *m = local_buf[node];
+  m->next = local_idx[node];
+  ((envelope *)UsrToEnv(m))->setUsersize(m->usedBytes());
+  // Counted with the other sends; tflush() used to leave these out.
+  bytes_sent += m->usedBytes();
+  bytes_alloc += m->payloadOffset() +
+                 ALIGN_DEFAULT(sizeof(itemT) * (size_t)m->cap);
+  msgs_sent++;
+  HTRAM_TIMED_SEND(nodeGrpProxy[node].receive_small(m);)
+  local_buf[node] = newHTramLocalMessage(LOCAL_BUFSIZE);
+  local_idx[node] = 0;
+  return true;
+}
+
+// The node's shared buffer toward `i`, shipped as tflush() always did: reserve
+// the rest of the buffer so no other PE copies into it, wait for the copies
+// already reserved to land, and send what they filled. If another PE is
+// already shipping it (full, or flushing), that PE owns it and this does
+// nothing.
+bool HTram::shipSharedPP(int i) {
+  if (!srcNodeGrp->done_count[i])
+    return false;
+  flush_msg_count++;
+  int idx = srcNodeGrp->get_idx[i].fetch_add(bufSize, std::memory_order_relaxed);
+  int done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_relaxed);
+  if (idx >= bufSize)
+    return false;
+  while (idx != done_count) {
+    done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_relaxed);
+  }
+#ifndef BUCKETS_BY_DEST
+  if (done_count == idx) {
+    int count = 0;
+    while (count < done_count) {
+      count = 0;
+      for (int j = 0; j < CkNodeSize(CkMyNode()); ++j) {
+        count += srcNodeGrp->mailbox_receiver[j + (i * CkNodeSize(CkMyNode()))].load(
+            std::memory_order_relaxed);
+        std::atomic_thread_fence(std::memory_order_acquire);
+      }
+    }
+    for (int j = 0; j < CkNodeSize(CkMyNode()); ++j)
+      srcNodeGrp->mailbox_receiver[j + (i * CkNodeSize(CkMyNode()))].store(
+          0, std::memory_order_relaxed);
+  }
+#endif
+  srcNodeGrp->msgBuffers[i]->next = srcNodeGrp->done_count[i];
+  trim(srcNodeGrp->msgBuffers[i]);
+  HTRAM_TIMED_SEND(nodeGrpProxy[i].receive(srcNodeGrp->msgBuffers[i]);)
+  srcNodeGrp->msgBuffers[i] = newHTramMessage(BUFSIZE + LOCAL_BUFSIZE);
+  srcNodeGrp->done_count[i] = 0;
+  srcNodeGrp->flush_count = 0;
+  srcNodeGrp->get_idx[i] = 0;
+  return true;
+}
+
+void HTram::insert(const datatype &item, int dest_pe) {
+#ifdef BUCKETS_BY_DEST
+  if (agg == WPs || agg == WW) {
+    if (holds)
+      CkAbort("htram: insert() bypasses the combining holds; use "
+              "sendItemPrioDeferredDest with combining on");
+    // The admitted, below-direct-threshold path of sendItemPrioDeferredDest:
+    // count the item in here, and every send site counts it back out.
+    const int dest = (agg == WW) ? dest_pe : nodeOf[dest_pe];
+    updates_in_tram[dest]++;
+    insertValueWPsTo(item, dest_pe, dest);
+    return;
+  }
+#else
+  if (agg == WPs || agg == WW)
+    CkAbort("htram: insert() under WPs/WW needs a BUCKETS_BY_DEST build");
+#endif
+  insertValue(item, dest_pe);
+}
+
+void HTram::flushTo(int dest_pe) {
+  const int node = dest_pe / CkNodeSize(0);
+  switch (agg) {
+#ifdef BUCKETS_BY_DEST
+  case WPs:
+    flushDest(node);
+    break;
+  case WW:
+    flushDest(dest_pe);
+    break;
+#endif
+  case WsP:
+    if (msgBuffers[node]->next) {
+      flush_msg_count++;
+      shipWsP(node);
+    }
+    break;
+  case PP:
+    shipLocalPP(node);
+    break;
+  default:
+    CkAbort("htram: flushTo() under WPs/WW needs a BUCKETS_BY_DEST build");
+  }
+}
+
+void HTram::flushPending() {
+  if (agg == PP) {
+    for (int i = 0; i < CkNumNodes(); i++)
+      shipLocalPP(i);
+    for (int i = 0; i < CkNumNodes(); i++)
+      shipSharedPP(i);
+    return;
+  }
+  if (agg == WsP) {
+    for (int i = 0; i < CkNumNodes(); i++)
+      if (msgBuffers[i]->next) {
+        flush_msg_count++;
+        shipWsP(i);
+      }
+    return;
+  }
+#ifdef BUCKETS_BY_DEST
+  for (int d = 0; d < destCount(); d++)
+    if (updates_in_tram[d] > 0 || msgBuffers[d]->next)
+      flushDest(d);
+#else
+  tflush();
+#endif
+}
+
+void HTram::setAggregationMode(int mode) {
+  if (mode < WPs || mode > WW)
+    CkAbort("htram: unknown aggregation mode %d", mode);
+  for (int i = 0; i < destCount(); i++)
+    if (msgBuffers[i] && msgBuffers[i]->next)
+      CkAbort("htram: setAggregationMode called with items buffered");
+  if (msgs_sent)
+    CkAbort("htram: setAggregationMode called after items were sent");
+  if (mode == PP && bufSize % LOCAL_BUFSIZE)
+    CkAbort("htram: PP needs a buffer size that is a multiple of %d, not %d",
+            LOCAL_BUFSIZE, bufSize);
+#ifdef BUCKETS_BY_DEST
+  if (holds && mode != WPs && mode != WW)
+    CkAbort("htram: combining needs per-destination buffers (WPs or WW)");
+#endif
+  for (int i = 0; i < destCount(); i++) {
+    delete msgBuffers[i];
+    msgBuffers[i] = nullptr;
+  }
+  agg = mode;
+  num_dest = destCount();
+  for (int i = 0; i < destCount(); i++) {
+#ifdef BUCKETS_BY_DEST
+    if (tram_hold && !tram_hold[i])
+      tram_hold[i] = new hold_queue[histo_bucket_count];
+#endif
+    msgBuffers[i] = newHTramMessage(bufSize);
+  }
 }
 
 void HTram::flush_everything() {
@@ -1323,7 +1450,9 @@ void HTram::receiveOnPE(HTramMessage *msg) {
     for (int i = 0; i < msg->next; i++)
       buf[i] = itemPayload(msg->items()[i]);
     cb_retarr(objPtr, buf, msg->next);
+    delete[] buf; // was leaked on every WW batch
   }
+  tot_recv_count += msg->next;
   delete msg;
 }
 
@@ -1344,10 +1473,13 @@ void HTramRecv::receiveOnProc(HTramMessage *agg_message) {
   for (int i = 0; i < agg_message->next; i++)
     buf[i] = itemPayload(agg_message->items()[i]);
   cb_retarr(objPtr, buf, agg_message->next);
+  delete[] buf;
   delete agg_message;
 #else
-  // Not used in GRAPH/BUCKETS_BY_DEST builds; entry must exist for def.h linkage.
-  delete agg_message;
+  // The entry must exist for def.h linkage, but the node receiver keeps no
+  // callback in this build, so the items used to be deleted unread. Nothing
+  // sends here (insertToProcess has no caller); fail loudly if that changes.
+  CkAbort("htram: receiveOnProc is not supported with BUCKETS_BY_DEST");
 #endif
 }
 

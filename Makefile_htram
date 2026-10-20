@@ -14,6 +14,13 @@ libhtram_group_phold.a: CFLAGS = -DPHOLD
 libhtram_group_phold.a: htram_group.o
 	$(CHARMC_SMP) $< -o $@ -language charm++ -O3
 
+# Optimistic PDES events (Charades). BUCKETS_BY_DEST gives WPs and WW their
+# per-destination flushes; PDES_PAYLOAD_BYTES (default 16) sizes the payload
+# slot, e.g. HTRAM_EXTRA=-DPDES_PAYLOAD_BYTES=96.
+libhtram_group_pdes.a: CFLAGS = -DPDES -DBUCKETS_BY_DEST $(HTRAM_EXTRA)
+libhtram_group_pdes.a: htram_group.o
+	$(CHARMC_SMP) $(CHARMCFLAGS) $< -o $@ -language charm++
+
 libhtram_group_unionfind.a: CFLAGS = -DUNIONFIND
 libhtram_group_unionfind.a: htram_group.o
 	$(CHARMC_SMP) $< -o $@ -language charm++ -O3
