@@ -555,6 +555,9 @@ class HTram : public CBase_HTram {
     void setSkipEmptyDeliveries(bool on) { skip_empty_deliveries = on; }
     unsigned long long stale_flushes = 0; // destinations flushed by flushStale
     unsigned long long idle_flushes = 0;  // destinations flushed by flushIdle
+    // PP: local buffers sent on their own because the shared node buffer was
+    // being shipped (copyToNodeBuf never waits for it)
+    unsigned long long local_bypasses = 0;
     // Turn on source-side combining. Must be called before the first send.
     // `ops` must outlive the library; `client` is handed to ops->on_absorb.
     void enableCombining(const HoldOps *ops, void *client);
