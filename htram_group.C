@@ -1209,12 +1209,21 @@ bool HTram::shipSharedPP(int i) {
   if (!srcNodeGrp->done_count[i])
     return false;
   flush_msg_count++;
-  // Acquire, as in copyToNodeBuf: the reservation for the buffer installed
-  // last, and the done counts for the items copied into it.
-  int idx = srcNodeGrp->get_idx[i].fetch_add(bufSize, std::memory_order_acquire);
+  // Reserve the rest of the buffer with a CAS, as copyToNodeBuf does, and
+  // give up if it is already full or being shipped. A fetch_add here that
+  // found it busy left its bufSize added, and idle PEs flushing on every
+  // scheduler pass during a stalled ship wrapped get_idx negative. Acquire,
+  // as in copyToNodeBuf: the buffer installed last, and the done counts for
+  // the items copied into it.
+  std::atomic<int> &get_idx = srcNodeGrp->get_idx[i];
+  int idx = get_idx.load(std::memory_order_acquire);
+  do {
+    if (idx >= bufSize)
+      return false;
+  } while (!get_idx.compare_exchange_weak(idx, idx + bufSize,
+                                          std::memory_order_acquire,
+                                          std::memory_order_acquire));
   int done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_acquire);
-  if (idx >= bufSize)
-    return false;
   while (idx != done_count) {
     done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_acquire);
   }
