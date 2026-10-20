@@ -16,7 +16,9 @@ libhtram_group_phold.a: htram_group.o
 
 # Optimistic PDES events (Charades). BUCKETS_BY_DEST gives WPs and WW their
 # per-destination flushes; PDES_PAYLOAD_BYTES (default 16) sizes the payload
-# slot, e.g. HTRAM_EXTRA=-DPDES_PAYLOAD_BYTES=96.
+# slot, e.g. HTRAM_EXTRA=-DPDES_PAYLOAD_BYTES=96; -DPDES_TIMED adds a send
+# timestamp to each item. A client must compile htram_group.h with the same
+# flags, so Charades builds htram_group.C itself rather than linking this.
 libhtram_group_pdes.a: CFLAGS = -DPDES -DBUCKETS_BY_DEST $(HTRAM_EXTRA)
 libhtram_group_pdes.a: htram_group.o
 	$(CHARMC_SMP) $(CHARMCFLAGS) $< -o $@ -language charm++

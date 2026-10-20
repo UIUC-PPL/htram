@@ -82,6 +82,13 @@ struct PdesItem {
   uint32_t offset;  // buckets ahead of GVT when sent
   uint8_t type_id;
   uint8_t type_size;
+#ifdef PDES_TIMED
+  // Send time (ns) and sending PE, for send-to-receive latency including the
+  // time an item waits in a buffer. Opt-in: 8 more bytes per item (64 -> 72
+  // with the default slot; 72 -> 80 on the wire with the destination PE).
+  int32_t src_pe;
+  int64_t send_ns;
+#endif
   char payload[PDES_PAYLOAD_BYTES];
 };
 typedef PdesItem datatype;
