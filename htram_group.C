@@ -766,12 +766,22 @@ void HTram::registercb() {
 
 std::mutex node_mutex;
 
+// PP's shared node buffer. A PE reserves a slot range with get_idx, copies
+// its items in, and counts them into done_count; whoever brings done_count to
+// bufSize (or a flush, shipSharedPP) ships the buffer, installs a new one and
+// resets the counters. With BUCKETS_BY_DEST the mailbox handshake below is
+// compiled out, and these atomics are all that orders the copies: each copy
+// is released by its done_count increment and acquired by the shipper's, and
+// a reservation acquires the reset that installed the buffer it copies into.
+// They were relaxed, which x86 forgives (every atomic RMW is a full barrier)
+// but ARM does not: a shipper could send items not yet written, and a PE
+// could copy into the buffer that had just been sent.
 void HTram::copyToNodeBuf(int destnode, int increment) {
   int idx = srcNodeGrp->get_idx[destnode].fetch_add(increment,
-                                                    std::memory_order_relaxed);
+                                                    std::memory_order_acquire);
   while (idx >= bufSize) {
     idx = srcNodeGrp->get_idx[destnode].fetch_add(increment,
-                                                  std::memory_order_relaxed);
+                                                  std::memory_order_acquire);
   }
   int i;
   for (i = 0; i < increment; i++) {
@@ -779,7 +789,7 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
         local_buf[destnode]->items()[i];
   }
   int done_count = srcNodeGrp->done_count[destnode].fetch_add(
-      increment, std::memory_order_relaxed);
+      increment, std::memory_order_acq_rel);
 
 #ifndef BUCKETS_BY_DEST
   srcNodeGrp->mailbox_receiver[CkMyRank() + (destnode * CkNodeSize(CkMyNode()))].fetch_add(
@@ -1186,12 +1196,14 @@ bool HTram::shipSharedPP(int i) {
   if (!srcNodeGrp->done_count[i])
     return false;
   flush_msg_count++;
-  int idx = srcNodeGrp->get_idx[i].fetch_add(bufSize, std::memory_order_relaxed);
-  int done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_relaxed);
+  // Acquire, as in copyToNodeBuf: the reservation for the buffer installed
+  // last, and the done counts for the items copied into it.
+  int idx = srcNodeGrp->get_idx[i].fetch_add(bufSize, std::memory_order_acquire);
+  int done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_acquire);
   if (idx >= bufSize)
     return false;
   while (idx != done_count) {
-    done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_relaxed);
+    done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_acquire);
   }
 #ifndef BUCKETS_BY_DEST
   if (done_count == idx) {
