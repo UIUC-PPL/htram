@@ -85,6 +85,9 @@ struct PdesItem {
   uint32_t offset;  // buckets ahead of GVT when sent
   uint8_t type_id;
   uint8_t type_size;
+  // Client flag bits (Charades: bit 0, the send delay was at least the
+  // optimism window). Fits the padding before the payload: no size change.
+  uint8_t flags;
 #ifdef PDES_TIMED
   // Send time (ns) and sending PE, for send-to-receive latency including the
   // time an item waits in a buffer. Opt-in: 8 more bytes per item (64 -> 72
