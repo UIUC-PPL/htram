@@ -1469,7 +1469,82 @@ HTramNodeGrp::HTramNodeGrp() {
 
 HTramNodeGrp::HTramNodeGrp(CkMigrateMessage *msg) {}
 
-HTramRecv::HTramRecv() { msg_stats[MIN_LATENCY] = 100.0; }
+HTramRecv::HTramRecv() {
+  msg_stats[MIN_LATENCY] = 100.0;
+  inbox.reset(new HTramInbox[CkNodeSize(CkMyNode())]);
+}
+
+void HTramRecv::deliverSorted(HTramNodeMessage *sorted,
+                              const std::vector<int> &sizes) {
+  const int first = CkNodeFirst(CkMyNode());
+  HTram *local = tram_proxy.ckLocalBranch();
+  if (local->inbox_delivery) {
+    // This PE's own share is delivered last, in place: it is already here
+    HTramNodeMessage *own = nullptr;
+    for (int r = 0; r < CkNodeSize(CkMyNode()); r++) {
+      if (!sizes[r])
+        continue;
+      HTramNodeMessage *m = (HTramNodeMessage *)CkReferenceMsg(sorted);
+      if (first + r == CkMyPe()) {
+        own = m;
+        continue;
+      }
+      HTramInbox &box = inbox[r];
+      std::lock_guard<std::mutex> guard(box.lock);
+      box.msgs.push_back(m);
+      box.pending.store((int)box.msgs.size(), std::memory_order_release);
+    }
+    CkFreeMsg(sorted);
+    if (own)
+      local->receivePerPE(own);
+    return;
+  }
+  // With skip_empty_deliveries, only the PEs this message carries items for.
+  // At 8 nodes a message averages ~70 items over 15 PEs, so most deliveries
+  // are a scheduler pass and a handler for nothing, and skipping them made
+  // orkut 1.1x faster. It is off by default because those empty deliveries
+  // also sit in each PE's FIFO ahead of its heap-pass continuations, and a
+  // high-diameter solve depends on that: mesh24 at 2 nodes ran 2.1x slower
+  // without them, more improvements arriving only after their vertex had
+  // been expanded (step 8b).
+  const bool skip = local->skip_empty_deliveries;
+  for (int r = 0; r < CkNodeSize(CkMyNode()); r++) {
+    if (skip && !sizes[r])
+      continue;
+    HTramNodeMessage *tmpMsg = (HTramNodeMessage *)CkReferenceMsg(sorted);
+    _SET_USED(UsrToEnv(tmpMsg), 0);
+    tram_proxy[first + r].receivePerPE(tmpMsg);
+  }
+  CkFreeMsg(sorted);
+}
+
+void HTram::setInboxDelivery(bool on) {
+  inbox_delivery = on;
+  if (on) {
+    skip_empty_deliveries = true;
+    recvNodeGrp = nodeGrpProxy.ckLocalBranch();
+  }
+}
+
+int HTram::drainInbox() {
+  if (!inbox_delivery)
+    return 0;
+  HTramInbox &box = recvNodeGrp->inbox[CkMyRank()];
+  if (box.pending.load(std::memory_order_acquire) == 0)
+    return 0;
+  // Swapped out under the lock and delivered outside it. A delivery never
+  // drains (the client calls this from its loop), so one buffer per thread.
+  static thread_local std::vector<HTramNodeMessage *> taken;
+  taken.clear();
+  {
+    std::lock_guard<std::mutex> guard(box.lock);
+    taken.swap(box.msgs);
+    box.pending.store(0, std::memory_order_relaxed);
+  }
+  for (HTramNodeMessage *m : taken)
+    receivePerPE(m);
+  return (int)taken.size();
+}
 
 HTramRecv::HTramRecv(CkMigrateMessage *msg) {}
 
@@ -1603,25 +1678,7 @@ void HTramRecv::receive(HTramMessage *agg_message) {
     sorted_agg_message->offset[i] =
         sorted_agg_message->offset[i - 1] + sizes[i];
 
-  // With skip_empty_deliveries, only the PEs this message carries items for.
-  // At 8 nodes a message averages ~70 items over 15 PEs, so most deliveries
-  // are a scheduler pass and a handler for nothing, and skipping them made
-  // orkut 1.1x faster. It is off by default because those empty deliveries
-  // also sit in each PE's FIFO ahead of its heap-pass continuations, and a
-  // high-diameter solve depends on that: mesh24 at 2 nodes ran 2.1x slower
-  // without them, more improvements arriving only after their vertex had
-  // been expanded (step 8b).
-  const int first = CkNodeFirst(CkMyNode());
-  const bool skip = tram_proxy.ckLocalBranch()->skip_empty_deliveries;
-  for (int r = 0; r < CkNodeSize(CkMyNode()); r++) {
-    if (skip && !sizes[r])
-      continue;
-    HTramNodeMessage *tmpMsg =
-        (HTramNodeMessage *)CkReferenceMsg(sorted_agg_message);
-    _SET_USED(UsrToEnv(tmpMsg), 0);
-    tram_proxy[first + r].receivePerPE(tmpMsg);
-  }
-  CkFreeMsg(sorted_agg_message);
+  deliverSorted(sorted_agg_message, sizes);
 }
 
 void HTramRecv::receive_small(HTramLocalMessage *agg_message) {
@@ -1659,25 +1716,7 @@ void HTramRecv::receive_small(HTramLocalMessage *agg_message) {
     sorted_agg_message->offset[i] =
         sorted_agg_message->offset[i - 1] + sizes[i];
 
-  // With skip_empty_deliveries, only the PEs this message carries items for.
-  // At 8 nodes a message averages ~70 items over 15 PEs, so most deliveries
-  // are a scheduler pass and a handler for nothing, and skipping them made
-  // orkut 1.1x faster. It is off by default because those empty deliveries
-  // also sit in each PE's FIFO ahead of its heap-pass continuations, and a
-  // high-diameter solve depends on that: mesh24 at 2 nodes ran 2.1x slower
-  // without them, more improvements arriving only after their vertex had
-  // been expanded (step 8b).
-  const int first = CkNodeFirst(CkMyNode());
-  const bool skip = tram_proxy.ckLocalBranch()->skip_empty_deliveries;
-  for (int r = 0; r < CkNodeSize(CkMyNode()); r++) {
-    if (skip && !sizes[r])
-      continue;
-    HTramNodeMessage *tmpMsg =
-        (HTramNodeMessage *)CkReferenceMsg(sorted_agg_message);
-    _SET_USED(UsrToEnv(tmpMsg), 0);
-    tram_proxy[first + r].receivePerPE(tmpMsg);
-  }
-  CkFreeMsg(sorted_agg_message);
+  deliverSorted(sorted_agg_message, sizes);
 }
 
 void HTramRecv::setTramProxy(CkGroupID tram_gid) {

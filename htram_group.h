@@ -12,8 +12,11 @@ extern thread_local unsigned long htram_send_tsc; // htram_group.C
 #define PARTIAL_FLUSH 0.2
 #endif
 #define ALL_BUF_TYPES
+#include <atomic>
 #include <climits>
 #include <cstddef>
+#include <memory>
+#include <mutex>
 #include <queue>
 #include <vector>
 
@@ -576,6 +579,17 @@ class HTram : public CBase_HTram {
     // HTramRecv::receive).
     bool skip_empty_deliveries = false;
     void setSkipEmptyDeliveries(bool on) { skip_empty_deliveries = on; }
+    // Inbox delivery: node-level receives (WPs, PP) put this PE's share of a
+    // node message in its inbox rather than sending it a receivePerPE message,
+    // which at ~2.5 items per PE cost a full message delivery per handful of
+    // items. The client must then call drainInbox() regularly on every PE, and
+    // whatever it uses for completion must count items, not messages:
+    // quiescence detection does not see an item waiting in an inbox. Implies
+    // skip_empty_deliveries. Returns the number of node messages taken.
+    bool inbox_delivery = false;
+    HTramRecv *recvNodeGrp = nullptr;
+    void setInboxDelivery(bool on);
+    int drainInbox();
     unsigned long long stale_flushes = 0; // destinations flushed by flushStale
     unsigned long long idle_flushes = 0;  // destinations flushed by flushIdle
     // PP: local buffers sent on their own because the shared node buffer was
@@ -637,6 +651,15 @@ class HTram : public CBase_HTram {
     void stop_periodic_flush();
 };
 
+// Inbox delivery (HTram::setInboxDelivery): a node-level receive hands each
+// local PE its share of a node message through that PE's inbox instead of a
+// receivePerPE message, and the PE takes it in its own loop (drainInbox).
+struct HTramInbox {
+  std::mutex lock;
+  std::vector<HTramNodeMessage *> msgs;
+  std::atomic<int> pending{0};  // a hint for the lock-free empty check
+};
+
 class HTramRecv : public CBase_HTramRecv {
   HTramRecv_SDAG_CODE
     CkCallback return_cb;
@@ -654,6 +677,12 @@ class HTramRecv : public CBase_HTramRecv {
     // bytes rather than wire bytes. They were a fixed BUFSIZE payload each.
     std::atomic<unsigned long long> node_msg_bytes{0};
     std::atomic<unsigned long long> node_msgs{0};
+    // One per PE of this node, indexed by rank
+    std::unique_ptr<HTramInbox[]> inbox;
+    // Fan a sorted node message out to the PEs of this node that get items:
+    // through their inboxes with inbox delivery on, else as receivePerPE
+    // messages. Takes over the caller's reference.
+    void deliverSorted(HTramNodeMessage *sorted, const std::vector<int> &sizes);
     HTramRecv();
     HTramRecv(CkMigrateMessage *msg);
     void setTramProxy(CkGroupID);
