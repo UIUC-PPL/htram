@@ -150,6 +150,14 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
 
   srcNodeGrp = (HTramNodeGrp *)srcNodeGrpProxy.ckLocalBranch();
   nodeGrp = (HTramRecv *)nodeGrpProxy.ckLocalBranch();
+  // PP's shared buffers start at this bufSize; every PE of the process
+  // offers the same value and the first one sets it
+  for (int i = 0; i < CkNumNodes(); i++) {
+    int unset = 0;
+    srcNodeGrp->pp_limit[i].compare_exchange_strong(unset, bufSize);
+  }
+  int unset = 0;
+  srcNodeGrp->pp_size.compare_exchange_strong(unset, bufSize);
 
   CkGroupID my_gid = ckGetGroupID();
   nodeGrp->setTramProxy(my_gid);
@@ -202,6 +210,18 @@ void HTram::setBufferSize(int new_size) {
             LOCAL_BUFSIZE, new_size);
   if (new_size == bufSize)
     return;
+  if (agg == PP) {
+    // The shared buffers take the new size as each is next installed (see
+    // HTramNodeGrp::pp_limit). Only growth: a copy may have read a limit
+    // from before an install, which is safe only if limits never shrink.
+    if (new_size < srcNodeGrp->pp_size.load(std::memory_order_relaxed))
+      CkAbort("htram: PP buffers can grow but not shrink (%d to %d)",
+              srcNodeGrp->pp_size.load(std::memory_order_relaxed), new_size);
+    int cur = srcNodeGrp->pp_size.load(std::memory_order_relaxed);
+    while (cur < new_size &&
+           !srcNodeGrp->pp_size.compare_exchange_weak(cur, new_size))
+      ;
+  }
 #ifdef BUCKETS_BY_DEST
   // Per-destination buffers can change size mid-run, which is what a client
   // steering the size from its own feedback needs. Every fill site sends when
@@ -789,10 +809,16 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
   // the destination process makes progress, while that process's PEs are
   // waiting here on their own shipper (PP with 16-item buffers on four
   // Stampede3 nodes: every worker spinning here or in an LCI send retry).
+  //
+  // The buffer's limit, not this PE's bufSize, decides when it is full. It
+  // only grows (setBufferSize), so a limit read before another PE installed
+  // a new buffer is at most the new one's: this PE may send its local buffer
+  // when there was room, never reserve past the limit.
   std::atomic<int> &get_idx = srcNodeGrp->get_idx[destnode];
+  std::atomic<int> &limit = srcNodeGrp->pp_limit[destnode];
   int idx = get_idx.load(std::memory_order_acquire);
   do {
-    if (idx >= bufSize) {
+    if (idx >= limit.load(std::memory_order_acquire)) {
       local_bypasses++;
       shipLocalPP(destnode);
       return;
@@ -821,10 +847,13 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
       increment, std::memory_order_release);
 #endif
 
-  if (done_count + increment == bufSize) {
+  // This buffer cannot be replaced before this copy is counted (a shipper
+  // waits for every reserved slot), so the limit read here is its own
+  const int full = limit.load(std::memory_order_acquire);
+  if (done_count + increment == full) {
 #ifndef BUCKETS_BY_DEST
     int count = 0;
-    while (count < bufSize) {
+    while (count < full) {
       count = 0;
       for (int i = 0; i < CkNodeSize(CkMyNode()); ++i) {
         count += srcNodeGrp->mailbox_receiver[i + (destnode * CkNodeSize(CkMyNode()))].load(
@@ -837,11 +866,14 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
           0, std::memory_order_relaxed);
 #endif
     agg_msg_count++;
-    srcNodeGrp->msgBuffers[destnode]->next = bufSize;
+    srcNodeGrp->msgBuffers[destnode]->next = full;
     trim(srcNodeGrp->msgBuffers[destnode]);
     HTRAM_TIMED_SEND(nodeGrpProxy[destnode].receive(srcNodeGrp->msgBuffers[destnode]);)
     srcNodeGrp->msgBuffers[destnode] = newHTramMessage(BUFSIZE + LOCAL_BUFSIZE);
     srcNodeGrp->min_key[destnode].store(LLONG_MAX, std::memory_order_relaxed);
+    // Before get_idx reopens the buffer (its store releases this)
+    limit.store(srcNodeGrp->pp_size.load(std::memory_order_relaxed),
+                std::memory_order_relaxed);
     srcNodeGrp->done_count[destnode] = 0;
     srcNodeGrp->get_idx[destnode] = 0;
   }
@@ -1230,12 +1262,17 @@ bool HTram::shipSharedPP(int i) {
   // scheduler pass during a stalled ship wrapped get_idx negative. Acquire,
   // as in copyToNodeBuf: the buffer installed last, and the done counts for
   // the items copied into it.
+  //
+  // Against the buffer's own limit (see copyToNodeBuf). The reservation goes
+  // past the largest limit any buffer can have, so no copy can start after
+  // it whatever limit that copy read.
   std::atomic<int> &get_idx = srcNodeGrp->get_idx[i];
+  std::atomic<int> &limit = srcNodeGrp->pp_limit[i];
   int idx = get_idx.load(std::memory_order_acquire);
   do {
-    if (idx >= bufSize)
+    if (idx >= limit.load(std::memory_order_acquire))
       return false;
-  } while (!get_idx.compare_exchange_weak(idx, idx + bufSize,
+  } while (!get_idx.compare_exchange_weak(idx, idx + BUFSIZE + LOCAL_BUFSIZE,
                                           std::memory_order_acquire,
                                           std::memory_order_acquire));
   int done_count = srcNodeGrp->done_count[i].fetch_add(0, std::memory_order_acquire);
@@ -1263,6 +1300,9 @@ bool HTram::shipSharedPP(int i) {
   HTRAM_TIMED_SEND(nodeGrpProxy[i].receive(srcNodeGrp->msgBuffers[i]);)
   srcNodeGrp->msgBuffers[i] = newHTramMessage(BUFSIZE + LOCAL_BUFSIZE);
   srcNodeGrp->min_key[i].store(LLONG_MAX, std::memory_order_relaxed);
+  // Before get_idx reopens the buffer (its store releases this)
+  limit.store(srcNodeGrp->pp_size.load(std::memory_order_relaxed),
+              std::memory_order_relaxed);
   srcNodeGrp->done_count[i] = 0;
   srcNodeGrp->flush_count = 0;
   srcNodeGrp->get_idx[i] = 0;
@@ -1449,8 +1489,10 @@ HTramNodeGrp::HTramNodeGrp() {
   get_idx.reset(new std::atomic<int>[CkNumNodes()]);
   done_count.reset(new std::atomic<int>[CkNumNodes()]);
   min_key.reset(new std::atomic<long long>[CkNumNodes()]);
+  pp_limit.reset(new std::atomic<int>[CkNumNodes()]);
   for (int i = 0; i < CkNumNodes(); i++) {
     min_key[i] = LLONG_MAX;
+    pp_limit[i] = 0;  // set from the first HTram's bufSize (HTram::HTram)
     // Written concurrently by every PE on the node, any of which may have a
     // different bufSize, so these are allocated at the maximum. The extra
     // LOCAL_BUFSIZE is slack for copyToNodeBuf, which claims a slot index

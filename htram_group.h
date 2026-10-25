@@ -336,6 +336,17 @@ class HTramNodeGrp : public CBase_HTramNodeGrp {
     // Smallest key (insert(item, pe, key)) among the items in each shared
     // buffer, LLONG_MAX when none; reset when the buffer ships.
     std::unique_ptr<std::atomic<long long>[]> min_key;
+    // PP: how many items each shared buffer takes before it ships, fixed
+    // when the buffer is installed (pp_size at that moment), and read by
+    // every PE that reserves in it or checks whether it is full. Each PE's
+    // own bufSize used to decide both, so while the PEs of a process
+    // disagreed (one had resized, another not yet), a PE on the smaller size
+    // shipped the buffer while one on the larger size was still copying past
+    // that point: it wrote into a sent message and counted into the next
+    // buffer, which then never matched and hung its shipper (Charades
+    // --agg-auto, PP 512 -> 2048 on 16 Stampede3 nodes: segfaults and hangs).
+    std::unique_ptr<std::atomic<int>[]> pp_limit;
+    std::atomic<int> pp_size{0};  ///< PP: limit for buffers installed from now on
     HTramMessage **msgBuffers;
 #ifndef BUCKETS_BY_DEST
     int num_mailboxes = 0;
