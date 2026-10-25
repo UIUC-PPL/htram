@@ -203,6 +203,16 @@ void HTram::tramStats(CkCallback cb) {
              CkReduction::sum_ulong_long, cb);
 }
 
+void HTram::initPPLimit(int n) {
+  CkAssert(agg == PP && n > 0 && n <= bufSize && n % LOCAL_BUFSIZE == 0);
+  for (int i = 0; i < CkNumNodes(); i++) {
+    // Nothing is in flight yet: the constructor's value is replaced outright
+    CkAssert(srcNodeGrp->get_idx[i].load(std::memory_order_relaxed) == 0);
+    srcNodeGrp->pp_limit[i].store(n, std::memory_order_relaxed);
+  }
+  srcNodeGrp->pp_size.store(n, std::memory_order_relaxed);
+}
+
 void HTram::setBufferSize(int new_size) {
   CkAssert(new_size > 0 && new_size <= BUFSIZE);
   if (agg == PP && new_size % LOCAL_BUFSIZE)

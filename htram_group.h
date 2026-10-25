@@ -516,6 +516,11 @@ class HTram : public CBase_HTram {
     HTram(CkGroupID gid, CkCallback cb);
     HTram(CkMigrateMessage *msg);
     void setBufferSize(int new_size);
+    // PP: cap the process's shared buffers at n items while this PE's own
+    // buffers keep the size they were allocated with. Diagnostic: it
+    // separates a larger buffer's allocation from its limit. Call on every PE
+    // with the same n, after construction and before any insert.
+    void initPPLimit(int n);
     void set_func_ptr(void (*func)(void *, datatype), void *);
     // 2-arg form used by UNIONFIND/paratreet
     void set_func_ptr_retarr(void (*func)(void *, datatype *, int), void *);
