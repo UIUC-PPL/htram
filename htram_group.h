@@ -323,6 +323,18 @@ inline HTramNodeMessage *newHTramNodeMessage(int capacity, int noffsets) {
   return m;
 }
 
+/**
+ * An atomic alone on its cache line. The per-destination counters of PP's
+ * shared buffers are written by every PE of a process; packed 16 to a line,
+ * a PE copying toward one destination took the line from PEs working on
+ * fifteen others.
+ */
+template <typename T>
+struct alignas(64) PaddedAtomic : std::atomic<T> {
+  PaddedAtomic() : std::atomic<T>() {}
+  using std::atomic<T>::operator=;
+};
+
 class HTramNodeGrp : public CBase_HTramNodeGrp {
   HTramNodeGrp_SDAG_CODE
   public:
@@ -331,11 +343,11 @@ class HTramNodeGrp : public CBase_HTramNodeGrp {
     // arrays while the constructor loops to CkNumNodes(), so any run on more
     // than 512 nodes wrote past them into whatever followed -- silently, and
     // within the range of node counts this code is meant to scale to.
-    std::unique_ptr<std::atomic<int>[]> get_idx;
-    std::unique_ptr<std::atomic<int>[]> done_count;
+    std::unique_ptr<PaddedAtomic<int>[]> get_idx;
+    std::unique_ptr<PaddedAtomic<int>[]> done_count;
     // Smallest key (insert(item, pe, key)) among the items in each shared
     // buffer, LLONG_MAX when none; reset when the buffer ships.
-    std::unique_ptr<std::atomic<long long>[]> min_key;
+    std::unique_ptr<PaddedAtomic<long long>[]> min_key;
     // PP: how many items each shared buffer takes before it ships, fixed
     // when the buffer is installed (pp_size at that moment), and read by
     // every PE that reserves in it or checks whether it is full. Each PE's
@@ -345,7 +357,7 @@ class HTramNodeGrp : public CBase_HTramNodeGrp {
     // that point: it wrote into a sent message and counted into the next
     // buffer, which then never matched and hung its shipper (Charades
     // --agg-auto, PP 512 -> 2048 on 16 Stampede3 nodes: segfaults and hangs).
-    std::unique_ptr<std::atomic<int>[]> pp_limit;
+    std::unique_ptr<PaddedAtomic<int>[]> pp_limit;
     std::atomic<int> pp_size{0};  ///< PP: limit for buffers installed from now on
     HTramMessage **msgBuffers;
 #ifndef BUCKETS_BY_DEST
@@ -668,7 +680,8 @@ class HTram : public CBase_HTram {
 // Inbox delivery (HTram::setInboxDelivery): a node-level receive hands each
 // local PE its share of a node message through that PE's inbox instead of a
 // receivePerPE message, and the PE takes it in its own loop (drainInbox).
-struct HTramInbox {
+// One cache line or more each: PEs check their own every pass
+struct alignas(64) HTramInbox {
   std::mutex lock;
   std::vector<HTramNodeMessage *> msgs;
   std::atomic<int> pending{0};  // a hint for the lock-free empty check

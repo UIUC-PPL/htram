@@ -1486,10 +1486,10 @@ void HTram::onBufferCount(int total) {
 
 HTramNodeGrp::HTramNodeGrp() {
   msgBuffers = new HTramMessage *[CkNumNodes()];
-  get_idx.reset(new std::atomic<int>[CkNumNodes()]);
-  done_count.reset(new std::atomic<int>[CkNumNodes()]);
-  min_key.reset(new std::atomic<long long>[CkNumNodes()]);
-  pp_limit.reset(new std::atomic<int>[CkNumNodes()]);
+  get_idx.reset(new PaddedAtomic<int>[CkNumNodes()]);
+  done_count.reset(new PaddedAtomic<int>[CkNumNodes()]);
+  min_key.reset(new PaddedAtomic<long long>[CkNumNodes()]);
+  pp_limit.reset(new PaddedAtomic<int>[CkNumNodes()]);
   for (int i = 0; i < CkNumNodes(); i++) {
     min_key[i] = LLONG_MAX;
     pp_limit[i] = 0;  // set from the first HTram's bufSize (HTram::HTram)
