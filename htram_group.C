@@ -1682,7 +1682,22 @@ void HTramRecv::receiveOnProc(HTramMessage *agg_message) {
 #endif
 }
 
+// Diagnostic: per-PE time and count of node-level receives (off unless set)
+bool htram_time_receives = false;
+thread_local double htram_recv_s = 0;
+thread_local unsigned long long htram_recv_n = 0;
+namespace {
+struct RecvTimer {
+  double t0;
+  RecvTimer() : t0(htram_time_receives ? CkWallTimer() : 0) {}
+  ~RecvTimer() {
+    if (htram_time_receives) { htram_recv_s += CkWallTimer() - t0; htram_recv_n++; }
+  }
+};
+}
+
 void HTramRecv::receive(HTramMessage *agg_message) {
+  RecvTimer timer;
   checkHTramEnvelope(agg_message, agg_message->usedBytes(), agg_message->next,
                      "HTramRecv::receive");
 
@@ -1734,6 +1749,7 @@ void HTramRecv::receive(HTramMessage *agg_message) {
 }
 
 void HTramRecv::receive_small(HTramLocalMessage *agg_message) {
+  RecvTimer timer;
   checkHTramEnvelope(agg_message, agg_message->usedBytes(), agg_message->next,
                      "HTramRecv::receive_small");
 

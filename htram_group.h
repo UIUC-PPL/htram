@@ -679,6 +679,12 @@ struct HTramInbox {
   std::atomic<int> pending{0};  // a hint for the lock-free empty check
 };
 
+// Diagnostic: per-PE time (s) and count of node-level receives (receive,
+// receive_small), accumulated only while htram_time_receives is set
+extern bool htram_time_receives;
+extern thread_local double htram_recv_s;
+extern thread_local unsigned long long htram_recv_n;
+
 class HTramRecv : public CBase_HTramRecv {
   HTramRecv_SDAG_CODE
     CkCallback return_cb;
