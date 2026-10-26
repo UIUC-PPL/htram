@@ -915,9 +915,10 @@ void HTram::tflush(bool idleflush) {
     srcNodeGrp->flush_count.fetch_add(1, std::memory_order_seq_cst);
     // Local buffers that hold nothing are no longer sent: each was a message
     // per node per flush carrying zero items.
-    for (int i = 0; i < CkNumNodes(); i++)
+    const std::vector<int> &order = flushOrder();
+    for (int i : order)
       shipLocalPP(i);
-    for (int i = 0; i < CkNumNodes(); i++)
+    for (int i : order)
       shipSharedPP(i);
   } else {
     int buf_count = CkNumNodes();
@@ -1375,20 +1376,47 @@ void HTram::insert(const datatype &item, int dest_pe, long long key) {
 }
 
 void HTram::flushDue(long long horizon) {
-  for (int d = 0; d < destCount(); d++)
+  const std::vector<int> &order = flushOrder();
+  for (int d : order)
     if (min_key_[d] <= horizon)
       flushIndex(d);
   if (agg == PP)
-    for (int i = 0; i < CkNumNodes(); i++)
+    for (int i : order)
       if (srcNodeGrp->min_key[i].load(std::memory_order_relaxed) <= horizon)
         shipSharedPP(i);
 }
 
+// In index order every pass sends toward low-numbered processes first, so
+// process p's buffer toward p+1 always goes out after its buffer toward p-1,
+// and the lower edge of every process gets its cross-process events late in
+// the pass (charades RESULTS.md section 101).
+const std::vector<int> &HTram::flushOrder() {
+  const int n = destCount();
+  flush_order_.resize(n);
+  const int start = htram_flush_order == 1 ? (int)(flush_pass_++ % n) : 0;
+  for (int k = 0; k < n; k++)
+    flush_order_[k] = (start + k) % n;
+  if (htram_flush_order == 2) {
+    auto key = [&](int d) {
+      long long k = min_key_[d];
+      if (agg == PP && d < CkNumNodes()) {
+        long long s = srcNodeGrp->min_key[d].load(std::memory_order_relaxed);
+        if (s < k) k = s;
+      }
+      return k;
+    };
+    std::stable_sort(flush_order_.begin(), flush_order_.end(),
+                     [&](int a, int b) { return key(a) < key(b); });
+  }
+  return flush_order_;
+}
+
 void HTram::flushPending() {
   if (agg == PP) {
-    for (int i = 0; i < CkNumNodes(); i++)
+    const std::vector<int> &order = flushOrder();
+    for (int i : order)
       shipLocalPP(i);
-    for (int i = 0; i < CkNumNodes(); i++)
+    for (int i : order)
       shipSharedPP(i);
     return;
   }
@@ -1681,6 +1709,8 @@ void HTramRecv::receiveOnProc(HTramMessage *agg_message) {
   CkAbort("htram: receiveOnProc is not supported with BUCKETS_BY_DEST");
 #endif
 }
+
+int htram_flush_order = 0;
 
 // Diagnostic: per-PE time and count of node-level receives (off unless set)
 bool htram_time_receives = false;

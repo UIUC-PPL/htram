@@ -494,6 +494,11 @@ class HTram : public CBase_HTram {
     // node's shared buffer. Return whether anything was sent.
     bool shipLocalPP(int node);
     bool shipSharedPP(int node);
+    // The destination processes in the order a flush pass visits them
+    // (htram_flush_order); rebuilt on each call.
+    const std::vector<int> &flushOrder();
+    std::vector<int> flush_order_;
+    unsigned flush_pass_ = 0;
     int destForItem(const datatype &value) {
       return HTRAM_ITEMS_CARRY_DEST ? get_dest_proc(objPtr, value) : -1;
     }
@@ -678,6 +683,12 @@ struct HTramInbox {
   std::vector<HTramNodeMessage *> msgs;
   std::atomic<int> pending{0};  // a hint for the lock-free empty check
 };
+
+// Order in which a flush pass visits destination processes (PP flushes, and
+// flushDue in every mode): 0 = by index, 0 to N-1 (default); 1 = by index,
+// starting one later on each pass; 2 = earliest buffered timestamp first.
+// Set once at startup, before any flush.
+extern int htram_flush_order;
 
 // Diagnostic: per-PE time (s) and count of node-level receives (receive,
 // receive_small), accumulated only while htram_time_receives is set
