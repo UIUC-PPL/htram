@@ -498,6 +498,7 @@ class HTram : public CBase_HTram {
     // (htram_flush_order); rebuilt on each call.
     const std::vector<int> &flushOrder();
     std::vector<int> flush_order_;
+    std::vector<long long> flush_keys_;
     unsigned flush_pass_ = 0;
     int destForItem(const datatype &value) {
       return HTRAM_ITEMS_CARRY_DEST ? get_dest_proc(objPtr, value) : -1;

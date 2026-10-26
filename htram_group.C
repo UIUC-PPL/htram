@@ -1397,16 +1397,20 @@ const std::vector<int> &HTram::flushOrder() {
   for (int k = 0; k < n; k++)
     flush_order_[k] = (start + k) % n;
   if (htram_flush_order == 2) {
-    auto key = [&](int d) {
+    // Read every key once, then sort the copy: the node's shared minima change
+    // under other PEs while the sort runs, and a comparator whose answers
+    // change is not a strict weak order (std::sort may then run off the end).
+    flush_keys_.resize(n);
+    for (int d = 0; d < n; d++) {
       long long k = min_key_[d];
       if (agg == PP && d < CkNumNodes()) {
         long long s = srcNodeGrp->min_key[d].load(std::memory_order_relaxed);
         if (s < k) k = s;
       }
-      return k;
-    };
+      flush_keys_[d] = k;
+    }
     std::stable_sort(flush_order_.begin(), flush_order_.end(),
-                     [&](int a, int b) { return key(a) < key(b); });
+                     [&](int a, int b) { return flush_keys_[a] < flush_keys_[b]; });
   }
   return flush_order_;
 }
