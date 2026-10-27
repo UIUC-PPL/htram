@@ -685,11 +685,42 @@ struct HTramInbox {
   std::atomic<int> pending{0};  // a hint for the lock-free empty check
 };
 
+// htram_inbox_mode 1: the same inbox on its own cache lines (the array above
+// packs neighbouring PEs' inboxes into shared lines)
+struct alignas(64) HTramPaddedInbox {
+  HTramInbox box;
+};
+
+// htram_inbox_mode 2: one single-producer ring per (sending rank, receiving
+// rank) of a process; the receiving PE owns a row of them. A push is a slot
+// write and a release store of the tail; a full ring falls back to the
+// mutex inbox. tail and head_cache belong to the producer, head to the
+// consumer, each on its own line.
+enum { HTRAM_RING_SLOTS = 256 };
+struct alignas(64) HTramRing {
+  std::atomic<uint32_t> tail{0};
+  uint32_t head_cache = 0;
+  alignas(64) std::atomic<uint32_t> head{0};
+  alignas(64) HTramNodeMessage *slots[HTRAM_RING_SLOTS];
+};
+struct alignas(64) HTramRingRow {
+  std::atomic<int> pending{0};  // set by producers after a push; the owner clears it before scanning
+  std::unique_ptr<HTramRing[]> rings;
+};
+
 // Order in which a flush pass visits destination processes (PP flushes, and
 // flushDue in every mode): 0 = by index, 0 to N-1 (default); 1 = by index,
 // starting one later on each pass; 2 = earliest buffered timestamp first.
 // Set once at startup, before any flush.
 extern int htram_flush_order;
+
+// How node-level receives hand a PE its share with inbox delivery on:
+// 0 = one mutex inbox per PE, packed in an array (default); 1 = the same, one
+// cache line apart; 2 = lock-free single-producer rings (HTramRing). Set once
+// per process before setInboxDelivery. htram_inbox_overflows counts pushes
+// that found their ring full and used the mutex inbox instead.
+extern int htram_inbox_mode;
+extern thread_local unsigned long long htram_inbox_overflows;
 
 // Diagnostic: per-PE time (s) and count of node-level receives (receive,
 // receive_small), accumulated only while htram_time_receives is set
@@ -724,6 +755,12 @@ class HTramRecv : public CBase_HTramRecv {
     std::atomic<unsigned long long> node_msgs{0};
     // One per PE of this node, indexed by rank
     std::unique_ptr<HTramInbox[]> inbox;
+    // htram_inbox_mode 1 and 2: each PE allocates its own entry when inbox
+    // delivery is turned on; until then producers use inbox[]
+    std::unique_ptr<std::atomic<HTramPaddedInbox *>[]> padded;
+    std::unique_ptr<std::atomic<HTramRingRow *>[]> ring_rows;
+    void pushToInbox(int rank, HTramNodeMessage *m);
+    void initOwnInbox();
     // Fan a sorted node message out to the PEs of this node that get items:
     // through their inboxes with inbox delivery on, else as receivePerPE
     // messages. Takes over the caller's reference.
