@@ -1579,9 +1579,9 @@ struct RecvTimer {
 
 HTramRecv::HTramRecv() {
   msg_stats[MIN_LATENCY] = 100.0;
-  inbox.reset(new HTramInbox[CkNodeSize(CkMyNode())]);
+  input_buffers.reset(new HTramInputBuffer[CkNodeSize(CkMyNode())]);
   const int n = CkNodeSize(CkMyNode());
-  padded.reset(new std::atomic<HTramPaddedInbox *>[n]);
+  padded.reset(new std::atomic<HTramPaddedInputBuffer *>[n]);
   ring_rows.reset(new std::atomic<HTramRingRow *>[n]);
   for (int r = 0; r < n; r++) {
     padded[r].store(nullptr, std::memory_order_relaxed);
@@ -1589,15 +1589,15 @@ HTramRecv::HTramRecv() {
   }
 }
 
-int htram_inbox_mode = 0;
-thread_local unsigned long long htram_inbox_overflows = 0;
+int htram_input_buffer_mode = 0;
+thread_local unsigned long long htram_input_buffer_overflows = 0;
 
-/** This PE's padded inbox or ring row, by htram_inbox_mode; on its own PE */
-void HTramRecv::initOwnInbox() {
+/** This PE's padded input buffer or ring row, by htram_input_buffer_mode; on its own PE */
+void HTramRecv::initOwnInputBuffer() {
   const int me = CkMyRank(), n = CkNodeSize(CkMyNode());
-  if (htram_inbox_mode == 1 && !padded[me].load(std::memory_order_relaxed)) {
-    padded[me].store(new HTramPaddedInbox, std::memory_order_release);
-  } else if (htram_inbox_mode == 2 &&
+  if (htram_input_buffer_mode == 1 && !padded[me].load(std::memory_order_relaxed)) {
+    padded[me].store(new HTramPaddedInputBuffer, std::memory_order_release);
+  } else if (htram_input_buffer_mode == 2 &&
              !ring_rows[me].load(std::memory_order_relaxed)) {
     HTramRingRow *row = new HTramRingRow;
     row->rings.reset(new HTramRing[n]);
@@ -1605,7 +1605,7 @@ void HTramRecv::initOwnInbox() {
   }
 }
 
-void HTramRecv::pushToInbox(int r, HTramNodeMessage *m) {
+void HTramRecv::pushToInputBuffer(int r, HTramNodeMessage *m) {
   if (HTramRingRow *row = ring_rows[r].load(std::memory_order_acquire)) {
     HTramRing &g = row->rings[CkMyRank()];
     const uint32_t t = g.tail.load(std::memory_order_relaxed);
@@ -1619,10 +1619,10 @@ void HTramRecv::pushToInbox(int r, HTramNodeMessage *m) {
       row->pending.store(1, std::memory_order_release);
       return;
     }
-    htram_inbox_overflows++;
+    htram_input_buffer_overflows++;
   }
-  HTramPaddedInbox *p = padded[r].load(std::memory_order_acquire);
-  HTramInbox &box = p ? p->box : inbox[r];
+  HTramPaddedInputBuffer *p = padded[r].load(std::memory_order_acquire);
+  HTramInputBuffer &box = p ? p->box : input_buffers[r];
   std::lock_guard<std::mutex> guard(box.lock);
   box.msgs.push_back(m);
   box.pending.store((int)box.msgs.size(), std::memory_order_release);
@@ -1632,7 +1632,7 @@ void HTramRecv::deliverSorted(HTramNodeMessage *sorted,
                               const std::vector<int> &sizes) {
   const int first = CkNodeFirst(CkMyNode());
   HTram *local = tram_proxy.ckLocalBranch();
-  if (local->inbox_delivery) {
+  if (local->input_buffer_delivery) {
     // This PE's own share is delivered last, in place: it is already here
     HTramNodeMessage *own = nullptr;
     int pushes = 0;
@@ -1644,7 +1644,7 @@ void HTramRecv::deliverSorted(HTramNodeMessage *sorted,
         own = m;
         continue;
       }
-      pushToInbox(r, m);
+      pushToInputBuffer(r, m);
       pushes++;
     }
     if (htram_time_receives) htram_recv_pushes += pushes;
@@ -1678,21 +1678,21 @@ void HTramRecv::deliverSorted(HTramNodeMessage *sorted,
   recvLap(4);
 }
 
-void HTram::setInboxDelivery(bool on) {
-  inbox_delivery = on;
+void HTram::setInputBufferDelivery(bool on) {
+  input_buffer_delivery = on;
   if (on) {
     skip_empty_deliveries = true;
     recvNodeGrp = nodeGrpProxy.ckLocalBranch();
-    recvNodeGrp->initOwnInbox();
+    recvNodeGrp->initOwnInputBuffer();
   }
 }
 
-int HTram::drainInbox() {
-  if (!inbox_delivery)
+int HTram::drainInputBuffer() {
+  if (!input_buffer_delivery)
     return 0;
   const int me = CkMyRank();
-  HTramInbox &box = recvNodeGrp->inbox[me];
-  HTramPaddedInbox *p = recvNodeGrp->padded[me].load(std::memory_order_relaxed);
+  HTramInputBuffer &box = recvNodeGrp->input_buffers[me];
+  HTramPaddedInputBuffer *p = recvNodeGrp->padded[me].load(std::memory_order_relaxed);
   HTramRingRow *row = recvNodeGrp->ring_rows[me].load(std::memory_order_relaxed);
   const bool rings = row && row->pending.load(std::memory_order_relaxed);
   const bool boxed = box.pending.load(std::memory_order_acquire) ||
@@ -1717,7 +1717,7 @@ int HTram::drainInbox() {
       g.head.store(h, std::memory_order_release);
     }
   }
-  for (HTramInbox *b : {&box, p ? &p->box : nullptr}) {
+  for (HTramInputBuffer *b : {&box, p ? &p->box : nullptr}) {
     if (!b || b->pending.load(std::memory_order_acquire) == 0)
       continue;
     more.clear();

@@ -604,17 +604,17 @@ class HTram : public CBase_HTram {
     // HTramRecv::receive).
     bool skip_empty_deliveries = false;
     void setSkipEmptyDeliveries(bool on) { skip_empty_deliveries = on; }
-    // Inbox delivery: node-level receives (WPs, PP) put this PE's share of a
-    // node message in its inbox rather than sending it a receivePerPE message,
+    // Input-buffer delivery: node-level receives (WPs, PP) put this PE's share of a
+    // node message in its input buffer rather than sending it a receivePerPE message,
     // which at ~2.5 items per PE cost a full message delivery per handful of
-    // items. The client must then call drainInbox() regularly on every PE, and
+    // items. The client must then call drainInputBuffer() regularly on every PE, and
     // whatever it uses for completion must count items, not messages:
-    // quiescence detection does not see an item waiting in an inbox. Implies
+    // quiescence detection does not see an item waiting in an input buffer. Implies
     // skip_empty_deliveries. Returns the number of node messages taken.
-    bool inbox_delivery = false;
+    bool input_buffer_delivery = false;
     HTramRecv *recvNodeGrp = nullptr;
-    void setInboxDelivery(bool on);
-    int drainInbox();
+    void setInputBufferDelivery(bool on);
+    int drainInputBuffer();
     unsigned long long stale_flushes = 0; // destinations flushed by flushStale
     unsigned long long idle_flushes = 0;  // destinations flushed by flushIdle
     // PP: local buffers sent on their own because the shared node buffer was
@@ -676,25 +676,25 @@ class HTram : public CBase_HTram {
     void stop_periodic_flush();
 };
 
-// Inbox delivery (HTram::setInboxDelivery): a node-level receive hands each
-// local PE its share of a node message through that PE's inbox instead of a
-// receivePerPE message, and the PE takes it in its own loop (drainInbox).
-struct HTramInbox {
+// Input-buffer delivery (HTram::setInputBufferDelivery): a node-level receive hands each
+// local PE its share of a node message through that PE's input buffer instead of a
+// receivePerPE message, and the PE takes it in its own loop (drainInputBuffer).
+struct HTramInputBuffer {
   std::mutex lock;
   std::vector<HTramNodeMessage *> msgs;
   std::atomic<int> pending{0};  // a hint for the lock-free empty check
 };
 
-// htram_inbox_mode 1: the same inbox on its own cache lines (the array above
-// packs neighbouring PEs' inboxes into shared lines)
-struct alignas(64) HTramPaddedInbox {
-  HTramInbox box;
+// htram_input_buffer_mode 1: the same input buffer on its own cache lines (the array above
+// packs neighbouring PEs' input buffers into shared lines)
+struct alignas(64) HTramPaddedInputBuffer {
+  HTramInputBuffer box;
 };
 
-// htram_inbox_mode 2: one single-producer ring per (sending rank, receiving
+// htram_input_buffer_mode 2: one single-producer ring per (sending rank, receiving
 // rank) of a process; the receiving PE owns a row of them. A push is a slot
 // write and a release store of the tail; a full ring falls back to the
-// mutex inbox. tail and head_cache belong to the producer, head to the
+// mutex input buffer. tail and head_cache belong to the producer, head to the
 // consumer, each on its own line.
 enum { HTRAM_RING_SLOTS = 256 };
 struct alignas(64) HTramRing {
@@ -714,13 +714,13 @@ struct alignas(64) HTramRingRow {
 // Set once at startup, before any flush.
 extern int htram_flush_order;
 
-// How node-level receives hand a PE its share with inbox delivery on:
-// 0 = one mutex inbox per PE, packed in an array (default); 1 = the same, one
+// How node-level receives hand a PE its share with input-buffer delivery on:
+// 0 = one mutex input buffer per PE, packed in an array (default); 1 = the same, one
 // cache line apart; 2 = lock-free single-producer rings (HTramRing). Set once
-// per process before setInboxDelivery. htram_inbox_overflows counts pushes
-// that found their ring full and used the mutex inbox instead.
-extern int htram_inbox_mode;
-extern thread_local unsigned long long htram_inbox_overflows;
+// per process before setInputBufferDelivery. htram_input_buffer_overflows counts pushes
+// that found their ring full and used the mutex input buffer instead.
+extern int htram_input_buffer_mode;
+extern thread_local unsigned long long htram_input_buffer_overflows;
 
 // Diagnostic: per-PE time (s) and count of node-level receives (receive,
 // receive_small), accumulated only while htram_time_receives is set
@@ -729,7 +729,7 @@ extern thread_local double htram_recv_s;
 extern thread_local unsigned long long htram_recv_n;
 // The same receives split into parts (s): 0 allocating the sorted message,
 // 1 finding each item's rank and copying it, 2 freeing the received message,
-// 3 handing the sorted message to other PEs (inbox pushes or messages),
+// 3 handing the sorted message to other PEs (input buffer pushes or messages),
 // 4 dropping the receiver's reference, 5 delivering this PE's own items;
 // plus the items received and the PEs handed a share
 enum { HTRAM_RECV_PARTS = 6 };
@@ -754,15 +754,15 @@ class HTramRecv : public CBase_HTramRecv {
     std::atomic<unsigned long long> node_msg_bytes{0};
     std::atomic<unsigned long long> node_msgs{0};
     // One per PE of this node, indexed by rank
-    std::unique_ptr<HTramInbox[]> inbox;
-    // htram_inbox_mode 1 and 2: each PE allocates its own entry when inbox
-    // delivery is turned on; until then producers use inbox[]
-    std::unique_ptr<std::atomic<HTramPaddedInbox *>[]> padded;
+    std::unique_ptr<HTramInputBuffer[]> input_buffers;
+    // htram_input_buffer_mode 1 and 2: each PE allocates its own entry when
+    // input-buffer delivery is turned on; until then producers use input_buffers[]
+    std::unique_ptr<std::atomic<HTramPaddedInputBuffer *>[]> padded;
     std::unique_ptr<std::atomic<HTramRingRow *>[]> ring_rows;
-    void pushToInbox(int rank, HTramNodeMessage *m);
-    void initOwnInbox();
+    void pushToInputBuffer(int rank, HTramNodeMessage *m);
+    void initOwnInputBuffer();
     // Fan a sorted node message out to the PEs of this node that get items:
-    // through their inboxes with inbox delivery on, else as receivePerPE
+    // through their input buffers with input-buffer delivery on, else as receivePerPE
     // messages. Takes over the caller's reference.
     void deliverSorted(HTramNodeMessage *sorted, const std::vector<int> &sizes);
     HTramRecv();
