@@ -1553,6 +1553,30 @@ HTramNodeGrp::HTramNodeGrp() {
 
 HTramNodeGrp::HTramNodeGrp(CkMigrateMessage *msg) {}
 
+bool htram_time_receives = false;
+thread_local double htram_recv_s = 0;
+thread_local unsigned long long htram_recv_n = 0;
+thread_local double htram_recv_part[HTRAM_RECV_PARTS] = {0};
+thread_local unsigned long long htram_recv_items = 0, htram_recv_pushes = 0;
+namespace {
+thread_local double recv_lap_t = 0;
+/** Charges the time since the last lap (or the receive's start) to part k */
+inline void recvLap(int k) {
+  if (!htram_time_receives)
+    return;
+  double t = CkWallTimer();
+  htram_recv_part[k] += t - recv_lap_t;
+  recv_lap_t = t;
+}
+struct RecvTimer {
+  double t0;
+  RecvTimer() : t0(htram_time_receives ? CkWallTimer() : 0) { recv_lap_t = t0; }
+  ~RecvTimer() {
+    if (htram_time_receives) { htram_recv_s += CkWallTimer() - t0; htram_recv_n++; }
+  }
+};
+}
+
 HTramRecv::HTramRecv() {
   msg_stats[MIN_LATENCY] = 100.0;
   inbox.reset(new HTramInbox[CkNodeSize(CkMyNode())]);
@@ -1565,6 +1589,7 @@ void HTramRecv::deliverSorted(HTramNodeMessage *sorted,
   if (local->inbox_delivery) {
     // This PE's own share is delivered last, in place: it is already here
     HTramNodeMessage *own = nullptr;
+    int pushes = 0;
     for (int r = 0; r < CkNodeSize(CkMyNode()); r++) {
       if (!sizes[r])
         continue;
@@ -1577,10 +1602,15 @@ void HTramRecv::deliverSorted(HTramNodeMessage *sorted,
       std::lock_guard<std::mutex> guard(box.lock);
       box.msgs.push_back(m);
       box.pending.store((int)box.msgs.size(), std::memory_order_release);
+      pushes++;
     }
+    if (htram_time_receives) htram_recv_pushes += pushes;
+    recvLap(3);
     CkFreeMsg(sorted);
+    recvLap(4);
     if (own)
       local->receivePerPE(own);
+    recvLap(5);
     return;
   }
   // With skip_empty_deliveries, only the PEs this message carries items for.
@@ -1598,8 +1628,11 @@ void HTramRecv::deliverSorted(HTramNodeMessage *sorted,
     HTramNodeMessage *tmpMsg = (HTramNodeMessage *)CkReferenceMsg(sorted);
     _SET_USED(UsrToEnv(tmpMsg), 0);
     tram_proxy[first + r].receivePerPE(tmpMsg);
+    if (htram_time_receives) htram_recv_pushes++;
   }
+  recvLap(3);
   CkFreeMsg(sorted);
+  recvLap(4);
 }
 
 void HTram::setInboxDelivery(bool on) {
@@ -1717,19 +1750,6 @@ void HTramRecv::receiveOnProc(HTramMessage *agg_message) {
 int htram_flush_order = 0;
 
 // Diagnostic: per-PE time and count of node-level receives (off unless set)
-bool htram_time_receives = false;
-thread_local double htram_recv_s = 0;
-thread_local unsigned long long htram_recv_n = 0;
-namespace {
-struct RecvTimer {
-  double t0;
-  RecvTimer() : t0(htram_time_receives ? CkWallTimer() : 0) {}
-  ~RecvTimer() {
-    if (htram_time_receives) { htram_recv_s += CkWallTimer() - t0; htram_recv_n++; }
-  }
-};
-}
-
 void HTramRecv::receive(HTramMessage *agg_message) {
   RecvTimer timer;
   checkHTramEnvelope(agg_message, agg_message->usedBytes(), agg_message->next,
@@ -1745,6 +1765,8 @@ void HTramRecv::receive(HTramMessage *agg_message) {
   node_msgs.fetch_add(1, std::memory_order_relaxed);
   node_msg_bytes.fetch_add(sorted_agg_message->allocBytes(),
                            std::memory_order_relaxed);
+  if (htram_time_receives) htram_recv_items += agg_message->next;
+  recvLap(0);
 
   std::vector<int> sizes(CkNodeSize(CkMyNode()), 0);
 
@@ -1772,7 +1794,9 @@ void HTramRecv::receive(HTramMessage *agg_message) {
   for (int i = 0; i < count; i++)
     sorted_agg_message->items()[sorted_agg_message->offset[ranks[i]]++] =
         itemPayload(agg_message->items()[i]);
+  recvLap(1);
   delete agg_message;
+  recvLap(2);
 
   sorted_agg_message->offset[0] = sizes[0];
   for (int i = 1; i < CkNodeSize(CkMyNode()); i++)
@@ -1793,6 +1817,8 @@ void HTramRecv::receive_small(HTramLocalMessage *agg_message) {
   node_msgs.fetch_add(1, std::memory_order_relaxed);
   node_msg_bytes.fetch_add(sorted_agg_message->allocBytes(),
                            std::memory_order_relaxed);
+  if (htram_time_receives) htram_recv_items += agg_message->next;
+  recvLap(0);
 
   std::vector<int> sizes(CkNodeSize(CkMyNode()), 0);
 
@@ -1811,7 +1837,9 @@ void HTramRecv::receive_small(HTramLocalMessage *agg_message) {
     sorted_agg_message->items()[sorted_agg_message->offset[rank]++] =
         itemPayload(agg_message->items()[i]);
   }
+  recvLap(1);
   delete agg_message;
+  recvLap(2);
 
   sorted_agg_message->offset[0] = sizes[0];
   for (int i = 1; i < CkNodeSize(CkMyNode()); i++)

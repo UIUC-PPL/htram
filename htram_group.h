@@ -696,6 +696,14 @@ extern int htram_flush_order;
 extern bool htram_time_receives;
 extern thread_local double htram_recv_s;
 extern thread_local unsigned long long htram_recv_n;
+// The same receives split into parts (s): 0 allocating the sorted message,
+// 1 finding each item's rank and copying it, 2 freeing the received message,
+// 3 handing the sorted message to other PEs (inbox pushes or messages),
+// 4 dropping the receiver's reference, 5 delivering this PE's own items;
+// plus the items received and the PEs handed a share
+enum { HTRAM_RECV_PARTS = 6 };
+extern thread_local double htram_recv_part[HTRAM_RECV_PARTS];
+extern thread_local unsigned long long htram_recv_items, htram_recv_pushes;
 
 class HTramRecv : public CBase_HTramRecv {
   HTramRecv_SDAG_CODE
