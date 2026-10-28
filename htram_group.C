@@ -16,7 +16,17 @@ thread_local unsigned long htram_send_tsc = 0;
     htram_send_tsc += __rdtsc() - htram_t0_;     \
   } while (0);
 #else
-#define HTRAM_TIMED_SEND(stmt) stmt
+// Diagnostic (htram_time_sends): the Charm++ send's time and count, part 1 of
+// htram_send_part
+#define HTRAM_TIMED_SEND(stmt)                                         \
+  do {                                                                 \
+    const double htram_s0_ = htram_time_sends ? CkWallTimer() : 0;     \
+    stmt                                                               \
+    if (htram_time_sends) {                                            \
+      htram_send_part[1] += CkWallTimer() - htram_s0_;                 \
+      htram_send_n++;                                                  \
+    }                                                                  \
+  } while (0);
 #endif
 
 //#define DEBUG 1
@@ -171,7 +181,9 @@ HTram::HTram(CkGroupID recv_ngid, CkGroupID src_ngid, int buffer_size,
 }
 
 void HTram::trim(HTramMessage *m) {
+  const double t0 = htram_time_sends ? CkWallTimer() : 0;
   trimHTramMessage(m);
+  if (htram_time_sends) htram_send_part[0] += CkWallTimer() - t0;
   bytes_sent += m->usedBytes();
   bytes_alloc += m->payloadOffset() +
                  ALIGN_DEFAULT(sizeof(itemT) * (size_t)m->cap);
@@ -1557,6 +1569,9 @@ bool htram_time_receives = false;
 thread_local double htram_recv_s = 0;
 thread_local unsigned long long htram_recv_n = 0;
 thread_local double htram_recv_part[HTRAM_RECV_PARTS] = {0};
+bool htram_time_sends = false;
+thread_local double htram_send_part[HTRAM_SEND_PARTS] = {0};
+thread_local unsigned long long htram_send_n = 0;
 thread_local unsigned long long htram_recv_items = 0, htram_recv_pushes = 0;
 namespace {
 thread_local double recv_lap_t = 0;

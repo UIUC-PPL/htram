@@ -361,6 +361,14 @@ typedef void (*callback_function_retarr)(void *, datatype *, int);
 typedef int  (*destproc_function)(void *, datatype);
 typedef void (*end_function)(void *);
 
+// Diagnostic: this PE's sends split into parts (every send site), accumulated only
+// while htram_time_sends is set: 0 sizing the envelope (trim), 1 the Charm++
+// send, 2 allocating the replacement buffer (renewBuffer); and the count.
+#define HTRAM_SEND_PARTS 3
+extern bool htram_time_sends;
+extern thread_local double htram_send_part[HTRAM_SEND_PARTS];
+extern thread_local unsigned long long htram_send_n;
+
 class HTram : public CBase_HTram {
   HTram_SDAG_CODE
 
@@ -483,8 +491,10 @@ class HTram : public CBase_HTram {
     // an extra flush -- but never high.
     std::vector<long long> min_key_;
     void renewBuffer(int d) {
+      const double t0 = htram_time_sends ? CkWallTimer() : 0;
       msgBuffers[d] = newHTramMessage(bufSize);
       min_key_[d] = LLONG_MAX;
+      if (htram_time_sends) htram_send_part[2] += CkWallTimer() - t0;
     }
     // Ship this PE's buffer toward destination index d (node, or PE under WW)
     void flushIndex(int d);
