@@ -723,6 +723,9 @@ struct alignas(64) HTramRingRow {
 // starting one later on each pass; 2 = earliest buffered timestamp first.
 // Set once at startup, before any flush.
 extern int htram_flush_order;
+/** PP: allocate each new shared buffer at its own limit, not BUFSIZE (default 0) */
+extern int htram_pp_alloc_limit;
+int ppCapacity(int limit);
 
 // How node-level receives hand a PE its share with input-buffer delivery on:
 // 0 = one mutex input buffer per PE, packed in an array (default); 1 = the same, one

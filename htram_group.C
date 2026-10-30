@@ -891,11 +891,11 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
     srcNodeGrp->msgBuffers[destnode]->next = full;
     trim(srcNodeGrp->msgBuffers[destnode]);
     HTRAM_TIMED_SEND(nodeGrpProxy[destnode].receive(srcNodeGrp->msgBuffers[destnode]);)
-    srcNodeGrp->msgBuffers[destnode] = newHTramMessage(BUFSIZE + LOCAL_BUFSIZE);
+    const int next_limit = srcNodeGrp->pp_size.load(std::memory_order_relaxed);
+    srcNodeGrp->msgBuffers[destnode] = newHTramMessage(ppCapacity(next_limit));
     srcNodeGrp->min_key[destnode].store(LLONG_MAX, std::memory_order_relaxed);
     // Before get_idx reopens the buffer (its store releases this)
-    limit.store(srcNodeGrp->pp_size.load(std::memory_order_relaxed),
-                std::memory_order_relaxed);
+    limit.store(next_limit, std::memory_order_relaxed);
     srcNodeGrp->done_count[destnode] = 0;
     srcNodeGrp->get_idx[destnode] = 0;
   }
@@ -1321,11 +1321,11 @@ bool HTram::shipSharedPP(int i) {
   srcNodeGrp->msgBuffers[i]->next = srcNodeGrp->done_count[i];
   trim(srcNodeGrp->msgBuffers[i]);
   HTRAM_TIMED_SEND(nodeGrpProxy[i].receive(srcNodeGrp->msgBuffers[i]);)
-  srcNodeGrp->msgBuffers[i] = newHTramMessage(BUFSIZE + LOCAL_BUFSIZE);
+  const int next_limit = srcNodeGrp->pp_size.load(std::memory_order_relaxed);
+  srcNodeGrp->msgBuffers[i] = newHTramMessage(ppCapacity(next_limit));
   srcNodeGrp->min_key[i].store(LLONG_MAX, std::memory_order_relaxed);
   // Before get_idx reopens the buffer (its store releases this)
-  limit.store(srcNodeGrp->pp_size.load(std::memory_order_relaxed),
-              std::memory_order_relaxed);
+  limit.store(next_limit, std::memory_order_relaxed);
   srcNodeGrp->done_count[i] = 0;
   srcNodeGrp->flush_count = 0;
   srcNodeGrp->get_idx[i] = 0;
@@ -1833,6 +1833,17 @@ void HTramRecv::receiveOnProc(HTramMessage *agg_message) {
 }
 
 int htram_flush_order = 0;
+int htram_pp_alloc_limit = 0;
+
+// PP: the capacity of a shared buffer installed with this limit. By default
+// htram's largest size, about 1.2 MB of PdesItems, allocated at every send of
+// a buffer that usually carries a few KB. With htram_pp_alloc_limit the
+// buffer's own limit: still enough, because a PE that read an older limit
+// read a smaller one (limits only grow, setBufferSize), and a limit is read
+// once here both for the capacity and for the limit stored with the buffer.
+int ppCapacity(int limit) {
+  return (htram_pp_alloc_limit ? limit : BUFSIZE) + LOCAL_BUFSIZE;
+}
 
 // Diagnostic: per-PE time and count of node-level receives (off unless set)
 void HTramRecv::receive(HTramMessage *agg_message) {
