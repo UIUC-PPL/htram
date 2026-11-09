@@ -1,5 +1,6 @@
 #include "htram_group.h"
 #include <algorithm>
+#include <new>
 #include <thread>
 #include <mutex>
 
@@ -1682,12 +1683,53 @@ void HTram::onBufferCount(int total) {
     CkStartQD(CkCallback(CkIndex_HTram::onQD(), thisProxy[0]));
 }
 
+// Storage for one PPCounters array: n elements `stride` bytes apart, the
+// first at `offset` bytes into a block aligned to 64 bytes when stride is
+// a whole cache line (so a padded element never straddles two lines).
+template <typename T>
+static void layOut(PPCounters<T> &c, std::unique_ptr<char[]> &store, int n,
+                   size_t stride, size_t offset, T init) {
+  const size_t align = stride >= 64 ? 64 : 1;
+  store.reset(new char[(size_t)n * stride + align]);
+  uintptr_t p = reinterpret_cast<uintptr_t>(store.get());
+  c.base = reinterpret_cast<char *>((p + align - 1) / align * align) + offset;
+  c.stride = stride;
+  for (int i = 0; i < n; i++)
+    new (c.base + (size_t)i * stride) std::atomic<T>(init);
+}
+
 HTramNodeGrp::HTramNodeGrp() {
   msgBuffers = new HTramMessage *[CkNumNodes()];
-  get_idx.reset(new std::atomic<int>[CkNumNodes()]);
-  done_count.reset(new std::atomic<int>[CkNumNodes()]);
-  min_key.reset(new std::atomic<long long>[CkNumNodes()]);
-  pp_limit.reset(new std::atomic<int>[CkNumNodes()]);
+  const int n = CkNumNodes();
+  switch (htram_pp_pad) {
+  case 0:  // four packed arrays, as before
+    layOut(get_idx, pp_store[0], n, sizeof(std::atomic<int>), 0, 0);
+    layOut(done_count, pp_store[1], n, sizeof(std::atomic<int>), 0, 0);
+    layOut(min_key, pp_store[2], n, sizeof(std::atomic<long long>), 0, LLONG_MAX);
+    layOut(pp_limit, pp_store[3], n, sizeof(std::atomic<int>), 0, 0);
+    break;
+  case 1:  // each array with one destination per 64-byte line
+    layOut(get_idx, pp_store[0], n, 64, 0, 0);
+    layOut(done_count, pp_store[1], n, 64, 0, 0);
+    layOut(min_key, pp_store[2], n, 64, 0, LLONG_MAX);
+    layOut(pp_limit, pp_store[3], n, 64, 0, 0);
+    break;
+  case 2: {  // one 64-byte line per destination holding all four
+    layOut(get_idx, pp_store[0], n, 64, 0, 0);
+    char *line0 = get_idx.base;
+    done_count.base = line0 + 4;  done_count.stride = 64;
+    pp_limit.base = line0 + 8;    pp_limit.stride = 64;
+    min_key.base = line0 + 16;    min_key.stride = 64;
+    for (int i = 0; i < n; i++) {
+      new (&done_count[i]) std::atomic<int>(0);
+      new (&pp_limit[i]) std::atomic<int>(0);
+      new (&min_key[i]) std::atomic<long long>(LLONG_MAX);
+    }
+    break;
+  }
+  default:
+    CkAbort("htram: htram_pp_pad must be 0, 1 or 2, not %d", htram_pp_pad);
+  }
   for (int i = 0; i < CkNumNodes(); i++) {
     min_key[i] = LLONG_MAX;
     pp_limit[i] = 0;  // set from the first HTram's bufSize (HTram::HTram)
@@ -1979,6 +2021,7 @@ void HTramRecv::receiveOnProc(HTramMessage *agg_message) {
 int htram_flush_order = 0;
 int htram_pp_alloc_limit = 0;
 int htram_pp_local_size = LOCAL_BUFSIZE;
+int htram_pp_pad = 0;
 
 // PP: the capacity of a shared buffer installed with this limit. By default
 // htram's largest size, about 1.2 MB of PdesItems, allocated at every send of

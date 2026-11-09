@@ -323,6 +323,22 @@ inline HTramNodeMessage *newHTramNodeMessage(int capacity, int noffsets) {
   return m;
 }
 
+// PP's per-destination shared counters (get_idx, done_count, pp_limit,
+// min_key), read through a byte stride so that their layout is a setting,
+// htram_pp_pad: 0 = four packed arrays, as before (16 destinations' ints to a
+// cache line, every PE of the process writing them); 1 = each destination's
+// counter on its own 64-byte line in each array; 2 = a destination's four
+// counters together on one 64-byte line. Set once per process, before the
+// node group is created.
+extern int htram_pp_pad;
+template <typename T> struct PPCounters {
+  char *base = nullptr;
+  size_t stride = sizeof(std::atomic<T>);
+  std::atomic<T> &operator[](int i) const {
+    return *reinterpret_cast<std::atomic<T> *>(base + (size_t)i * stride);
+  }
+};
+
 class HTramNodeGrp : public CBase_HTramNodeGrp {
   HTramNodeGrp_SDAG_CODE
   public:
@@ -331,11 +347,14 @@ class HTramNodeGrp : public CBase_HTramNodeGrp {
     // arrays while the constructor loops to CkNumNodes(), so any run on more
     // than 512 nodes wrote past them into whatever followed -- silently, and
     // within the range of node counts this code is meant to scale to.
-    std::unique_ptr<std::atomic<int>[]> get_idx;
-    std::unique_ptr<std::atomic<int>[]> done_count;
+    // PP's per-destination counters live in pp_store, laid out by htram_pp_pad
+    // (PPCounters, above); indexing is as for the arrays they were.
+    std::unique_ptr<char[]> pp_store[4];
+    PPCounters<int> get_idx;
+    PPCounters<int> done_count;
     // Smallest key (insert(item, pe, key)) among the items in each shared
     // buffer, LLONG_MAX when none; reset when the buffer ships.
-    std::unique_ptr<std::atomic<long long>[]> min_key;
+    PPCounters<long long> min_key;
     // PP: how many items each shared buffer takes before it ships, fixed
     // when the buffer is installed (pp_size at that moment), and read by
     // every PE that reserves in it or checks whether it is full. Each PE's
@@ -345,7 +364,7 @@ class HTramNodeGrp : public CBase_HTramNodeGrp {
     // that point: it wrote into a sent message and counted into the next
     // buffer, which then never matched and hung its shipper (Charades
     // --agg-auto, PP 512 -> 2048 on 16 Stampede3 nodes: segfaults and hangs).
-    std::unique_ptr<std::atomic<int>[]> pp_limit;
+    PPCounters<int> pp_limit;
     std::atomic<int> pp_size{0};  ///< PP: limit for buffers installed from now on
     HTramMessage **msgBuffers;
 #ifndef BUCKETS_BY_DEST
