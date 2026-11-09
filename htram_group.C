@@ -748,7 +748,12 @@ void HTram::insertToProcess(datatype value, int destNode) {
 void HTram::insertValue(datatype value, int dest_pe) {
   int destNode = dest_pe / CkNodeSize(0);
 
-  if (agg == PP) {
+  if (agg == PP && htram_pp_local_size < LOCAL_BUFSIZE) {
+    // copyLocalToNodeBuf leaves fewer than LOCAL_BUFSIZE items here
+    setItem(local_buf[destNode]->items()[local_idx[destNode]], value, dest_pe);
+    if (++local_idx[destNode] >= htram_pp_local_size)
+      copyLocalToNodeBuf(destNode);
+  } else if (agg == PP) {
     int increment = 1;
     int idx_dnode = local_idx[destNode];
     if (idx_dnode <= LOCAL_BUFSIZE - 1) {
@@ -901,6 +906,79 @@ void HTram::copyToNodeBuf(int destnode, int increment) {
   }
   local_idx[destnode] = 0;
   min_key_[destnode] = LLONG_MAX;
+}
+
+// PP with htram_pp_local_size below LOCAL_BUFSIZE: copy everything in this
+// PE's local buffer toward `destnode` into the shared buffer. Copies are not
+// all the same size here (a PE keeps its items while the shared buffer is
+// being sent, and copies them together later), so the copy that fills the
+// buffer can end past its limit, and the last copy to finish is not
+// necessarily the one that filled it. The rule is therefore that of
+// shipSharedPP: the PE whose reservation reaches the limit owns the buffer
+// (no later reservation or flush can succeed), waits for the copies reserved
+// before its own, and sends it. Waiting is safe for the reason it is in
+// shipSharedPP: those copies are in progress and send nothing. A buffer has
+// room for LOCAL_BUFSIZE items past its limit (ppCapacity), and a copy is at
+// most LOCAL_BUFSIZE - 1 items.
+//
+// While the buffer is full or being sent, the items stay here, and go with
+// this PE's next copy toward `destnode` or its next due flush (min_key_
+// covers them). Sending them alone, as copyToNodeBuf does, would send one-
+// item messages at local size 1 whenever another PE was sending (Mac, 2 x 4
+// PEs, uniform PHOLD: 8% of events). Only a full local buffer goes alone.
+void HTram::copyLocalToNodeBuf(int destnode) {
+#ifndef BUCKETS_BY_DEST
+  CkAbort("htram: htram_pp_local_size below %d needs a BUCKETS_BY_DEST build",
+          LOCAL_BUFSIZE);
+#endif
+  const int n = local_idx[destnode];
+  std::atomic<int> &get_idx = srcNodeGrp->get_idx[destnode];
+  std::atomic<int> &limit = srcNodeGrp->pp_limit[destnode];
+  int idx = get_idx.load(std::memory_order_acquire);
+  int lim;
+  do {
+    // Read after the index it is checked against: a buffer installed later
+    // changes the index too, and this reservation then fails
+    lim = limit.load(std::memory_order_acquire);
+    if (idx >= lim) {
+      if (n < LOCAL_BUFSIZE)
+        return;
+      local_bypasses++;
+      shipLocalPP(destnode);
+      return;
+    }
+  } while (!get_idx.compare_exchange_weak(idx, idx + n,
+                                          std::memory_order_acquire,
+                                          std::memory_order_acquire));
+  HTramMessage *m = srcNodeGrp->msgBuffers[destnode];
+  for (int i = 0; i < n; i++)
+    m->items()[idx + i] = local_buf[destnode]->items()[i];
+  // The shared buffer's minimum key covers these items before they count as
+  // done, so no ship of this buffer can reset it in between.
+  long long k = min_key_[destnode];
+  std::atomic<long long> &shared_min = srcNodeGrp->min_key[destnode];
+  long long cur = shared_min.load(std::memory_order_relaxed);
+  while (k < cur &&
+         !shared_min.compare_exchange_weak(cur, k, std::memory_order_relaxed))
+    ;
+  srcNodeGrp->done_count[destnode].fetch_add(n, std::memory_order_acq_rel);
+  local_idx[destnode] = 0;
+  min_key_[destnode] = LLONG_MAX;
+  if (idx + n < lim)
+    return;
+  while (srcNodeGrp->done_count[destnode].load(std::memory_order_acquire) != idx + n)
+    ;
+  agg_msg_count++;
+  m->next = idx + n;
+  trim(m);
+  HTRAM_TIMED_SEND(nodeGrpProxy[destnode].receive(m);)
+  const int next_limit = srcNodeGrp->pp_size.load(std::memory_order_relaxed);
+  srcNodeGrp->msgBuffers[destnode] = newHTramMessage(ppCapacity(next_limit));
+  srcNodeGrp->min_key[destnode].store(LLONG_MAX, std::memory_order_relaxed);
+  // Before get_idx reopens the buffer (its store releases this)
+  limit.store(next_limit, std::memory_order_relaxed);
+  srcNodeGrp->done_count[destnode] = 0;
+  srcNodeGrp->get_idx[destnode] = 0;
 }
 
 void HTram::enableIdleFlush() {
@@ -1332,6 +1410,58 @@ bool HTram::shipSharedPP(int i) {
   return true;
 }
 
+// The shared buffer toward `i` with this PE's local items added at its end,
+// sent as one message (htram_pp_local_size below LOCAL_BUFSIZE). Reserving
+// the rest of the buffer, as shipSharedPP does, makes every slot from the
+// reservation point on this PE's: no other PE can reserve there, and a buffer
+// has room for LOCAL_BUFSIZE items past its limit (ppCapacity), more than a
+// local buffer holds. The local items go in before the wait for the copies
+// already reserved, and the message is sent once those have landed. If the
+// buffer is full or another PE is sending it, that PE owns it and this PE's
+// items go on their own, as in copyToNodeBuf.
+bool HTram::shipSharedWithLocalPP(int i) {
+  const int own = local_idx[i];
+  if (!own)
+    return shipSharedPP(i);
+#ifndef BUCKETS_BY_DEST
+  // The mailbox handshake counts items per copying PE; this path adds items
+  // outside it.
+  CkAbort("htram: htram_pp_local_size below %d needs a BUCKETS_BY_DEST build",
+          LOCAL_BUFSIZE);
+#endif
+  std::atomic<int> &get_idx = srcNodeGrp->get_idx[i];
+  std::atomic<int> &limit = srcNodeGrp->pp_limit[i];
+  int idx = get_idx.load(std::memory_order_acquire);
+  do {
+    if (idx >= limit.load(std::memory_order_acquire)) {
+      local_bypasses++;
+      return shipLocalPP(i);
+    }
+  } while (!get_idx.compare_exchange_weak(idx, idx + BUFSIZE + LOCAL_BUFSIZE,
+                                          std::memory_order_acquire,
+                                          std::memory_order_acquire));
+  flush_msg_count++;
+  HTramMessage *m = srcNodeGrp->msgBuffers[i];
+  for (int k = 0; k < own; k++)
+    m->items()[idx + k] = local_buf[i]->items()[k];
+  while (srcNodeGrp->done_count[i].load(std::memory_order_acquire) != idx)
+    ;
+  m->next = idx + own;
+  trim(m);
+  HTRAM_TIMED_SEND(nodeGrpProxy[i].receive(m);)
+  const int next_limit = srcNodeGrp->pp_size.load(std::memory_order_relaxed);
+  srcNodeGrp->msgBuffers[i] = newHTramMessage(ppCapacity(next_limit));
+  srcNodeGrp->min_key[i].store(LLONG_MAX, std::memory_order_relaxed);
+  // Before get_idx reopens the buffer (its store releases this)
+  limit.store(next_limit, std::memory_order_relaxed);
+  srcNodeGrp->done_count[i] = 0;
+  srcNodeGrp->flush_count = 0;
+  srcNodeGrp->get_idx[i] = 0;
+  local_idx[i] = 0;
+  min_key_[i] = LLONG_MAX;
+  return true;
+}
+
 void HTram::insert(const datatype &item, int dest_pe) {
 #ifdef BUCKETS_BY_DEST
   if (agg == WPs || agg == WW) {
@@ -1371,7 +1501,12 @@ void HTram::flushIndex(int dest) {
     }
     break;
   case PP:
-    shipLocalPP(dest);
+    // With a local size below LOCAL_BUFSIZE the item just inserted may
+    // already be in the shared buffer (always, at size 1), so that goes too.
+    if (htram_pp_local_size < LOCAL_BUFSIZE)
+      shipSharedWithLocalPP(dest);
+    else
+      shipLocalPP(dest);
     break;
   default:
     CkAbort("htram: flushTo() under WPs/WW needs a BUCKETS_BY_DEST build");
@@ -1389,6 +1524,15 @@ void HTram::insert(const datatype &item, int dest_pe, long long key) {
 
 void HTram::flushDue(long long horizon) {
   const std::vector<int> &order = flushOrder();
+  if (agg == PP && htram_pp_local_size < LOCAL_BUFSIZE) {
+    // One message per due destination: the shared buffer, with whatever this
+    // PE still holds in its local buffer toward it (due or not) added.
+    for (int d : order)
+      if (min_key_[d] <= horizon ||
+          srcNodeGrp->min_key[d].load(std::memory_order_relaxed) <= horizon)
+        shipSharedWithLocalPP(d);
+    return;
+  }
   for (int d : order)
     if (min_key_[d] <= horizon)
       flushIndex(d);
@@ -1834,6 +1978,7 @@ void HTramRecv::receiveOnProc(HTramMessage *agg_message) {
 
 int htram_flush_order = 0;
 int htram_pp_alloc_limit = 0;
+int htram_pp_local_size = LOCAL_BUFSIZE;
 
 // PP: the capacity of a shared buffer installed with this limit. By default
 // htram's largest size, about 1.2 MB of PdesItems, allocated at every send of

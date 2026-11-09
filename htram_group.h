@@ -504,6 +504,9 @@ class HTram : public CBase_HTram {
     // node's shared buffer. Return whether anything was sent.
     bool shipLocalPP(int node);
     bool shipSharedPP(int node);
+    // PP with htram_pp_local_size below LOCAL_BUFSIZE: send the node's shared
+    // buffer with this PE's local items added, as one message.
+    bool shipSharedWithLocalPP(int node);
     // The destination processes in the order a flush pass visits them
     // (htram_flush_order); rebuilt on each call.
     const std::vector<int> &flushOrder();
@@ -546,6 +549,9 @@ class HTram : public CBase_HTram {
                              void (*func3)(void *), void *);
     int getAggregatingPE(int dest_pe);
     void copyToNodeBuf(int destnode, int increment);
+    // PP with htram_pp_local_size below LOCAL_BUFSIZE: copy this PE's whole
+    // local buffer toward destnode, any number of items
+    void copyLocalToNodeBuf(int destnode);
     void insertValue(datatype send_value, int dest_pe);
     void insertValueWPs(datatype send_value, int dest_pe);
     void insertValueWPsTo(datatype send_value, int dest_pe, int dest_node);
@@ -726,6 +732,14 @@ extern int htram_flush_order;
 /** PP: allocate each new shared buffer at its own limit, not BUFSIZE (default 0) */
 extern int htram_pp_alloc_limit;
 int ppCapacity(int limit);
+// PP: items a PE collects in its local buffer toward a process before copying
+// them into the process's shared buffer: LOCAL_BUFSIZE (default) or 1, 2, 4,
+// 8. Below LOCAL_BUFSIZE, flushTo() and flushDue() send the shared buffer
+// with this PE's local items added (shipSharedWithLocalPP), so a process
+// sends one message toward a destination process where its PEs each sent
+// one. At LOCAL_BUFSIZE every path is as before. Set once per process,
+// before the first insert.
+extern int htram_pp_local_size;
 
 // How node-level receives hand a PE its share with input-buffer delivery on:
 // 0 = one mutex input buffer per PE, packed in an array (default); 1 = the same, one
